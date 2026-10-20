@@ -93,6 +93,9 @@ function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes
   }));
 
   app.post("/exam/events", withAttempt((req, res, attempt, sessions) => {
+    if (rules.isClosed(attempt)) {
+      return sendError(res, 409, `attempt is ${attempt.status}`, { attempt: rules.publicAttempt(attempt) });
+    }
     const error = rules.recordEvents(attempt, req.body?.events);
     if (error) return sendError(res, 400, error);
     store.saveSessions(sessions);

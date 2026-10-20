@@ -25,6 +25,20 @@ const EVENT_TYPES = new Set([
   "answers-recovered",
 ]);
 
+// How serious each event is, for the instructor timeline.
+const SEVERITY = {
+  "fullscreen-exit": "critical",
+  "camera-lost": "critical",
+  "screen-capture-failed": "warning",
+  "window-blur": "warning",
+  "network-offline": "warning",
+  "answers-recovered": "warning",
+};
+
+function severityOf(type) {
+  return SEVERITY[type] || "info";
+}
+
 // Events that immediately lock answering until an instructor unlocks.
 const LOCKING_EVENTS = new Set(["fullscreen-exit"]);
 
@@ -57,6 +71,10 @@ function refreshStatus(attempt, now = Date.now()) {
     attempt.submittedAt = new Date(now).toISOString();
   }
   return attempt;
+}
+
+function isClosed(attempt) {
+  return attempt.status === STATUS.SUBMITTED || attempt.status === STATUS.EXPIRED;
 }
 
 function validateAnswers(answers, questions) {
@@ -94,15 +112,27 @@ function saveAnswers(attempt, { answers, flags = [] }, questions, now = Date.now
   return null;
 }
 
+// Records client events. Each event carries a client-generated id so a
+// retried request never records the same event twice.
 function recordEvents(attempt, events, now = Date.now()) {
-  if (!Array.isArray(events) || events.length > 50) return "events must be an array of up to 50 items";
-  for (const event of events) {
-    if (!event || !EVENT_TYPES.has(event.type)) return `unknown event type ${event?.type}`;
+  if (!Array.isArray(events) || events.length === 0 || events.length > 50) {
+    return "events must be an array of 1 to 50 items";
   }
   for (const event of events) {
+    if (!event || !EVENT_TYPES.has(event.type)) return `unknown event type ${event?.type}`;
+    if (typeof event.id !== "string" || !/^[\w-]{1,64}$/.test(event.id)) return "each event needs a valid id";
+  }
+  const seen = new Set(attempt.events.map((item) => item.id).filter(Boolean));
+  for (const event of events) {
+    if (seen.has(event.id)) continue;
+    seen.add(event.id);
     const clientTime = Date.parse(event.at);
     attempt.events.push({
+      id: event.id,
+      seq: attempt.events.length + 1,
+      attemptId: attempt.sessionId,
       type: event.type,
+      severity: severityOf(event.type),
       clientAt: Number.isNaN(clientTime) ? null : new Date(clientTime).toISOString(),
       receivedAt: new Date(now).toISOString(),
       detail: typeof event.detail === "string" ? event.detail.slice(0, 200) : undefined,
@@ -114,11 +144,24 @@ function recordEvents(attempt, events, now = Date.now()) {
   return null;
 }
 
+// Server-generated events (instructor actions) share the same shape.
+function serverEvent(attempt, type, detail, now) {
+  attempt.events.push({
+    id: `server-${attempt.events.length + 1}`,
+    seq: attempt.events.length + 1,
+    attemptId: attempt.sessionId,
+    type,
+    severity: "info",
+    receivedAt: new Date(now).toISOString(),
+    detail,
+  });
+}
+
 function unlock(attempt, now = Date.now()) {
   refreshStatus(attempt, now);
   if (attempt.status !== STATUS.LOCKED) return `attempt is ${attempt.status}`;
   attempt.status = STATUS.IN_PROGRESS;
-  attempt.events.push({ type: "instructor-unlocked", receivedAt: new Date(now).toISOString() });
+  serverEvent(attempt, "instructor-unlocked", undefined, now);
   return null;
 }
 
@@ -135,7 +178,7 @@ function extend(attempt, minutes, now = Date.now()) {
     attempt.submittedAt = null;
   }
   attempt.extensions.push({ minutes, at: new Date(now).toISOString() });
-  attempt.events.push({ type: "time-extended", detail: `+${minutes} min`, receivedAt: new Date(now).toISOString() });
+  serverEvent(attempt, "time-extended", `+${minutes} min`, now);
   return null;
 }
 
@@ -144,6 +187,7 @@ function submit(attempt, now = Date.now()) {
   if (attempt.status === STATUS.SUBMITTED) return null; // idempotent for retries
   attempt.status = STATUS.SUBMITTED;
   attempt.submittedAt = new Date(now).toISOString();
+  serverEvent(attempt, "submitted", undefined, now);
   return null;
 }
 
@@ -172,6 +216,8 @@ module.exports = {
   STATUS,
   EVENT_TYPES,
   GRACE_MS,
+  severityOf,
+  isClosed,
   createAttempt,
   refreshStatus,
   saveAnswers,

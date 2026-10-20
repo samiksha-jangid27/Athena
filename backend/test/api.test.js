@@ -75,7 +75,7 @@ test("malformed JSON and unknown routes return JSON errors", async () => {
 
 test("locked attempts reject answers until an instructor unlocks", async () => {
   const { token, attempt } = await startAttempt();
-  await call("POST", "/exam/events", { token, body: { events: [{ type: "fullscreen-exit", at: new Date().toISOString() }] } });
+  await call("POST", "/exam/events", { token, body: { events: [{ id: "x1", type: "fullscreen-exit", at: new Date().toISOString() }] } });
   const rejected = await call("PUT", "/exam/answers", { token, body: { answers: { 1: 1 } } });
   assert.equal(rejected.status, 409);
   assert.equal(rejected.body.attempt.status, "locked");
@@ -129,9 +129,17 @@ test("duplicate submissions do not change the result", async () => {
 
 test("invalid events are rejected and nothing is recorded", async () => {
   const { token, attempt } = await startAttempt();
-  const bad = await call("POST", "/exam/events", { token, body: { events: [{ type: "window-blur" }, { type: "keystrokes" }] } });
+  const bad = await call("POST", "/exam/events", { token, body: { events: [{ id: "a", type: "window-blur" }, { id: "b", type: "keystrokes" }] } });
   assert.equal(bad.status, 400);
   assert.equal((await call("POST", "/exam/events", { token, body: { events: "nope" } })).status, 400);
   const { body } = await call("GET", "/instructor/attempts", { key: KEY });
   assert.equal(body.find((item) => item.sessionId === attempt.sessionId).eventCount, 0);
+});
+
+test("events after submission are rejected with a conflict", async () => {
+  const { token } = await startAttempt();
+  await call("POST", "/exam/submit", { token, body: {} });
+  const late = await call("POST", "/exam/events", { token, body: { events: [{ id: "z", type: "window-blur" }] } });
+  assert.equal(late.status, 409);
+  assert.equal(late.body.attempt.status, "submitted");
 });

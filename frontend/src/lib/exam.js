@@ -15,8 +15,13 @@ export function formatDuration(ms) {
   return `${minutes}:${seconds}`
 }
 
+function eventId() {
+  return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+// Each event gets a unique id so the server can ignore retried duplicates.
 export function makeEvent(type, detail, now = Date.now()) {
-  const event = { type, at: new Date(now).toISOString() }
+  const event = { id: eventId(), type, at: new Date(now).toISOString() }
   if (detail) event.detail = detail
   return event
 }

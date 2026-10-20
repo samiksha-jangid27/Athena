@@ -20,7 +20,10 @@ test('formatDuration rounds up to whole seconds', () => {
 })
 
 test('makeEvent timestamps events', () => {
-  assert.deepEqual(makeEvent('window-blur', undefined, 0), { type: 'window-blur', at: '1970-01-01T00:00:00.000Z' })
+  const event = makeEvent('window-blur', undefined, 0)
+  assert.equal(event.type, 'window-blur')
+  assert.equal(event.at, '1970-01-01T00:00:00.000Z')
+  assert.notEqual(event.id, makeEvent('window-blur').id)
   assert.equal(makeEvent('camera-lost', 'ended', 0).detail, 'ended')
 })
 

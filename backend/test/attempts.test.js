@@ -45,7 +45,7 @@ test("saving within the grace period still works", () => {
 test("fullscreen exit locks answers until an instructor unlocks", () => {
   const attempt = newAttempt();
   const at = new Date(START).toISOString();
-  assert.equal(rules.recordEvents(attempt, [{ type: "fullscreen-exit", at }], START), null);
+  assert.equal(rules.recordEvents(attempt, [{ id: "e1", type: "fullscreen-exit", at }], START), null);
   assert.equal(attempt.status, "locked");
   assert.match(rules.saveAnswers(attempt, { answers: { 1: 0 } }, questions, START), /locked/);
   assert.equal(rules.unlock(attempt, START), null);
@@ -55,8 +55,21 @@ test("fullscreen exit locks answers until an instructor unlocks", () => {
 
 test("unknown event types are rejected without recording anything", () => {
   const attempt = newAttempt();
-  assert.match(rules.recordEvents(attempt, [{ type: "window-blur" }, { type: "keylog" }], START), /unknown event/);
+  assert.match(rules.recordEvents(attempt, [{ id: "a", type: "window-blur" }, { id: "b", type: "keylog" }], START), /unknown event/);
+  assert.match(rules.recordEvents(attempt, [{ type: "window-blur" }], START), /valid id/);
+  assert.match(rules.recordEvents(attempt, [], START), /1 to 50/);
   assert.equal(attempt.events.length, 0);
+});
+
+test("retried events are recorded once, with severity and attempt id", () => {
+  const attempt = newAttempt();
+  const batch = [{ id: "e1", type: "window-blur" }, { id: "e2", type: "camera-lost", detail: "ended" }];
+  rules.recordEvents(attempt, batch, START);
+  rules.recordEvents(attempt, batch, START + 1000);
+  assert.equal(attempt.events.length, 2);
+  assert.deepEqual(attempt.events.map((event) => event.severity), ["warning", "critical"]);
+  assert.equal(attempt.events[1].attemptId, attempt.sessionId);
+  assert.equal(attempt.events[1].seq, 2);
 });
 
 test("extension moves the deadline and keeps answers", () => {
