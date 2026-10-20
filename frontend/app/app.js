@@ -74,6 +74,8 @@ function startBackend() {
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
+      // Lets the backend exit on its own if Athena crashes or is killed.
+      ATHENA_PARENT_PID: String(process.pid),
       ATHENA_QUESTIONS_PATH: paths.questions,
       ATHENA_SESSIONS_PATH: paths.sessions,
       NODE_PATH: path.join(process.resourcesPath, "app.asar", "node_modules"),
@@ -270,6 +272,11 @@ app.on("before-quit", () => {
   stopProctoring();
   if (backendProcess) backendProcess.kill();
 });
+
+// Quit cleanly (and stop the backend) on Ctrl+C or a terminate signal.
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => app.quit());
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();

@@ -35,3 +35,17 @@ server.on("error", (error) => {
   }
   process.exit(1);
 });
+
+// When started by the Athena desktop app, exit if that app goes away, so a
+// crash never leaves an orphaned backend holding the port.
+const parentPid = Number(process.env.ATHENA_PARENT_PID);
+if (parentPid) {
+  setInterval(() => {
+    try {
+      process.kill(parentPid, 0);
+    } catch {
+      console.log("Athena app is gone; stopping backend.");
+      process.exit(0);
+    }
+  }, 2000).unref();
+}

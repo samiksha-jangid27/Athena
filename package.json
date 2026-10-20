@@ -27,15 +27,31 @@
     "extraResources": [
       {
         "from": "backend",
-        "to": "backend"
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!test/**",
+          "!data/sessions.json",
+          "!data/sessions.json.tmp",
+          "!data/artifacts/**"
+        ]
       }
     ],
     "mac": {
       "target": "dmg",
-      "category": "public.app-category.education"
+      "category": "public.app-category.education",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Athena uses your camera during exams to take periodic photos for exam integrity, as explained before the exam starts."
+      }
     },
     "win": {
       "target": "nsis"
-    }
+    },
+    "files": [
+      "app/**/*",
+      "!app/**/*.test.js",
+      "dist/**/*",
+      "package.json"
+    ]
   }
 }
