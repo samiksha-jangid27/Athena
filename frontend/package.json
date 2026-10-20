@@ -1,28 +1,25 @@
 {
-  "name": "athena5",
+  "name": "athena",
   "version": "1.0.0",
-  "description": "Athena secure desktop assessment platform",
-  "author": "Athena",
+  "description": "A cross-platform desktop examination and proctoring platform featuring exam integrity monitoring, camera and screen capture, instructor controls, and practical assessment support.",
+  "author": "Samiksha Jangid",
   "private": true,
   "type": "module",
-
   "main": "app/app.js",
-
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "electron": "electron ./app/app.js"
+    "electron": "electron ./app/app.js",
+    "test": "node --test src/lib/"
   },
-
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
-
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@types/react": "^19.2.18",

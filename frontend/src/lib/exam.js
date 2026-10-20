@@ -1,0 +1,89 @@
+// Pure exam helpers (no React), so they are easy to test.
+
+export const STORAGE_KEY = 'athena.attempt'
+
+// Server clock is the reference; offset = serverTime - localTime.
+export function remainingMs(deadline, serverOffsetMs = 0, now = Date.now()) {
+  if (!deadline) return 0
+  return Math.max(0, Date.parse(deadline) - (now + serverOffsetMs))
+}
+
+export function formatDuration(ms) {
+  const totalSeconds = Math.ceil(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0')
+  const seconds = (totalSeconds % 60).toString().padStart(2, '0')
+  return `${minutes}:${seconds}`
+}
+
+export function makeEvent(type, detail, now = Date.now()) {
+  const event = { type, at: new Date(now).toISOString() }
+  if (detail) event.detail = detail
+  return event
+}
+
+// Students may answer only while the server says in-progress, no lock is
+// pending locally, and time remains.
+export function canAnswer({ status, pendingLock, remaining }) {
+  return status === 'in-progress' && !pendingLock && remaining > 0
+}
+
+// Local answers win when they were not yet saved (e.g. crash or offline).
+export function mergeRecovered(serverState, localState) {
+  if (!localState || !localState.dirty) {
+    return { answers: serverState.answers || {}, flags: serverState.flags || [], recovered: false }
+  }
+  return {
+    answers: { ...serverState.answers, ...localState.answers },
+    flags: localState.flags || serverState.flags || [],
+    recovered: true,
+  }
+}
+
+export class HttpError extends Error {
+  constructor(status, body) {
+    super(body?.message || `Request failed (${status})`)
+    this.status = status
+    this.body = body
+  }
+}
+
+// Retries network errors and 5xx responses; 4xx are final.
+export async function withRetry(fn, { retries = 3, baseDelayMs = 500, sleep } = {}) {
+  const wait = sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
+  let lastError
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      lastError = error
+      const retryable = !(error instanceof HttpError) || error.status >= 500
+      if (!retryable || attempt === retries) break
+      await wait(baseDelayMs * 2 ** attempt)
+    }
+  }
+  throw lastError
+}
+
+export function loadLocal(storage = globalThis.localStorage) {
+  try {
+    return JSON.parse(storage.getItem(STORAGE_KEY)) || null
+  } catch {
+    return null
+  }
+}
+
+export function saveLocal(state, storage = globalThis.localStorage) {
+  try {
+    storage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // Storage full or unavailable: the server copy is still the backup.
+  }
+}
+
+export function clearLocal(storage = globalThis.localStorage) {
+  try {
+    storage.removeItem(STORAGE_KEY)
+  } catch {
+    // ignore
+  }
+}
