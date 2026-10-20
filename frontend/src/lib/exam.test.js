@@ -103,3 +103,12 @@ test('validateIdentity explains what is wrong', async () => {
   assert.match(validateIdentity({ name: 'A', studentId: 'CS-2041' }).name, /too short/)
   assert.match(validateIdentity({ name: 'Asha', studentId: 'a b' }).studentId, /letters, numbers/)
 })
+
+test('syncLabel never reports a save that did not happen', async () => {
+  const { syncLabel } = await import('./exam.js')
+  assert.equal(syncLabel({ saveState: 'saved', lastSavedAt: null, online: true }).text, 'No changes yet')
+  assert.equal(syncLabel({ saveState: 'saved', lastSavedAt: Date.now(), online: true }).tone, 'success')
+  assert.equal(syncLabel({ saveState: 'saved', lastSavedAt: Date.now(), online: false }).tone, 'warning')
+  assert.equal(syncLabel({ saveState: 'offline', lastSavedAt: Date.now(), online: true }).tone, 'warning')
+  assert.equal(syncLabel({ saveState: 'rejected', lastSavedAt: Date.now(), online: true }).tone, 'danger')
+})

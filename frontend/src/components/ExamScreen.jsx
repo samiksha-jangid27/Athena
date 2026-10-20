@@ -1,11 +1,9 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { formatDuration } from '../lib/exam.js'
+import { formatDuration, syncLabel } from '../lib/exam.js'
 import { answerSummary, filterQuestions, keyAction, timerLevel } from '../lib/navigation.js'
 import Button from './ui/Button.jsx'
 import Icon from './ui/Icon.jsx'
 import Callout from './ui/Callout.jsx'
-
-const SAVE_TEXT = { saved: 'All answers saved', saving: 'Saving…', offline: 'Offline, saved on this device', rejected: 'Not saved: answers are locked' }
 
 function Indicator({ ok, label }) {
   return <div className={`status-line ${ok ? 'ok' : 'bad'}`}><Icon name={ok ? 'check' : 'alert'} size={14} />{label}</div>
@@ -13,7 +11,7 @@ function Indicator({ ok, label }) {
 
 const FILTERS = [['all', 'All'], ['unanswered', 'Unanswered'], ['flagged', 'Flagged']]
 
-export default function ExamScreen({ exam, camera, athena, examTitle = 'Exam' }) {
+export default function ExamScreen({ exam, camera, athena }) {
   const [current, setCurrent] = useState(0)
   const [filter, setFilter] = useState('all')
   const [confirming, setConfirming] = useState(false)
@@ -92,6 +90,7 @@ export default function ExamScreen({ exam, camera, athena, examTitle = 'Exam' })
   const level = timerLevel(exam.remaining)
   const visible = filterQuestions(questions, filter, answers, flags)
   const isLast = current === questions.length - 1
+  const sync = syncLabel({ saveState: exam.saveState, lastSavedAt: exam.lastSavedAt, online })
 
   // Keyboard shortcuts: ← → to move, 1–9 to choose, F to flag.
   const handlersRef = useRef({})
@@ -120,15 +119,21 @@ export default function ExamScreen({ exam, camera, athena, examTitle = 'Exam' })
       <header className="exam-bar">
         <div className="exam-bar-title">
           <span className="eyebrow">In progress</span>
-          <strong>{examTitle}</strong>
+          <strong>{exam.examTitle}</strong>
         </div>
         <div className={`timer-pill timer-${level}`} role="timer" aria-label={`Time remaining ${formatDuration(exam.remaining)}`}>
           <Icon name="clock" size={16} />
           <span>{formatDuration(exam.remaining)}</span>
         </div>
-        <div className="exam-bar-progress">
-          <span>{summary.answered} of {summary.total} answered</span>
-          <div className="progress-track" aria-hidden="true"><span style={{ width: `${(summary.answered / Math.max(summary.total, 1)) * 100}%` }} /></div>
+        <div className="exam-bar-right">
+          <div className={`sync-state tone-${sync.tone}`} role="status">
+            <Icon name={sync.tone === 'success' ? 'check' : sync.tone === 'neutral' ? 'cloud' : 'alert'} size={14} />
+            {sync.text}
+          </div>
+          <div className="exam-bar-progress">
+            <span className="num">{summary.answered}/{summary.total} answered</span>
+            <div className="progress-track" aria-hidden="true"><span style={{ width: `${(summary.answered / Math.max(summary.total, 1)) * 100}%` }} /></div>
+          </div>
         </div>
       </header>
       {level === 'critical' && exam.remaining > 0 && <p className="visually-hidden" role="alert">Less than one minute remaining.</p>}
@@ -168,7 +173,7 @@ export default function ExamScreen({ exam, camera, athena, examTitle = 'Exam' })
             <Indicator ok={camera.status === 'live'} label={camera.status === 'live' ? 'Camera on' : 'Camera interrupted'} />
             <Indicator ok={athena ? screenOk !== false : false} label={!athena ? 'Screen capture: desktop app only' : screenOk === false ? 'Screen capture blocked' : 'Screen snapshots on'} />
             <Indicator ok={isFullscreen} label={isFullscreen ? 'Fullscreen' : 'Not fullscreen'} />
-            <Indicator ok={online && exam.saveState !== 'offline'} label={SAVE_TEXT[exam.saveState]} />
+            <Indicator ok={online} label={online ? 'Connected' : 'No network connection'} />
             <Indicator ok={exam.eventState.pending === 0 && exam.eventState.rejected === 0}
               label={exam.eventState.rejected ? `${exam.eventState.rejected} activity events rejected`
                 : exam.eventState.pending ? `${exam.eventState.pending} activity events waiting to send` : 'Activity log synced'} />

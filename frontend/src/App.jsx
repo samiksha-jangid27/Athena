@@ -26,6 +26,13 @@ function StudentApp() {
     if (needsCamera) startCamera()
   }, [needsCamera, startCamera])
 
+  // Focus mode: hide app navigation while an attempt is running.
+  useEffect(() => {
+    if (phase !== 'active') return undefined
+    document.documentElement.dataset.focus = 'exam'
+    return () => delete document.documentElement.dataset.focus
+  }, [phase])
+
   // Release the camera once the exam is over.
   const stopCamera = camera.stop
   useEffect(() => {

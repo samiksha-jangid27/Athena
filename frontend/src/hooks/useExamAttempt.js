@@ -13,6 +13,7 @@ export function useExamAttempt() {
   const [token, setToken] = useState(null)
   const [attempt, setAttempt] = useState(null) // { status, deadline, ... } from server
   const [questions, setQuestions] = useState([])
+  const [examTitle, setExamTitle] = useState('')
   const [answers, setAnswers] = useState({})
   const [flags, setFlags] = useState([])
   const [serverOffset, setServerOffset] = useState(0)
@@ -157,6 +158,7 @@ export function useExamAttempt() {
     stateRef.current = { token: newToken, answers: merged.answers, flags: merged.flags }
     setToken(newToken)
     setQuestions(data.questions)
+    setExamTitle(data.exam?.title || 'Exam')
     setAnswers(merged.answers)
     setFlags(merged.flags)
     setResult(null)
@@ -261,7 +263,7 @@ export function useExamAttempt() {
   }, [])
 
   return {
-    phase, token, attempt, questions, answers, flags, remaining, answerable,
+    phase, token, attempt, questions, examTitle, answers, flags, remaining, answerable,
     pendingLock, saveState, lastSavedAt, eventState, result, submitting, submitError,
     begin, recover, chooseAnswer, toggleFlag, logEvent, submit, reset,
   }

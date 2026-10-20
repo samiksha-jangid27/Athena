@@ -81,6 +81,7 @@ function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes
     store.saveSessions(sessions);
     res.status(201).json({
       token,
+      exam: { title: examTitle },
       attempt: rules.publicAttempt(attempt),
       questions: store.readQuestions().map(questionForStudent),
     });
@@ -90,6 +91,7 @@ function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes
   app.get("/exam/attempt", withAttempt((req, res, attempt, sessions) => {
     store.saveSessions(sessions); // persist any status change from refreshStatus
     res.json({
+      exam: { title: examTitle },
       attempt: rules.publicAttempt(attempt),
       questions: store.readQuestions().map(questionForStudent),
     });
