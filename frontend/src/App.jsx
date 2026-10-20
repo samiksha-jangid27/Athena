@@ -8,6 +8,9 @@ import RecoveryScreen from './components/RecoveryScreen.jsx'
 import { useCamera } from './hooks/useCamera.js'
 import { useExamAttempt } from './hooks/useExamAttempt.js'
 import { useTheme } from './hooks/useTheme.js'
+import Logo from './components/ui/Logo.jsx'
+import Button from './components/ui/Button.jsx'
+import { ToastProvider } from './components/ui/Toast.jsx'
 
 const athena = typeof window !== 'undefined' ? window.athena : undefined
 
@@ -42,6 +45,8 @@ function StudentApp() {
   return <Readiness camera={camera} onBegin={exam.begin} isDesktop={Boolean(athena)} />
 }
 
+const THEME_ICON = { system: 'monitor', light: 'sun', dark: 'moon' }
+
 function App() {
   const [route, setRoute] = useState(window.location.hash)
   useEffect(() => {
@@ -53,16 +58,23 @@ function App() {
   const { theme, cycle } = useTheme()
 
   return (
-    <div className="app-shell">
-      <header className="topbar">
-        <div className="brand"><span className="brand-mark">A</span><span>Athena</span></div>
-        <div className="secure-label"><span className="status-dot" /> {instructor ? 'Instructor view' : 'Monitored exam session'}</div>
-        <button className="rules-link" onClick={cycle} aria-label={`Theme: ${theme}. Change theme`}>Theme: {theme}</button>
-        <a className="rules-link" href={instructor ? '#/' : '#/instructor'}>{instructor ? 'Student view' : 'Instructor'}</a>
-      </header>
-      {instructor ? <InstructorDashboard /> : <StudentApp />}
-      <footer className="app-footer"><span>ATHENA / EXAM PLATFORM</span><span>v1.0.0</span></footer>
-    </div>
+    <ToastProvider>
+      <div className="app-shell">
+        <a className="skip-link" href="#main">Skip to content</a>
+        <header className="app-header">
+          <div className="brand"><Logo /><span>Athena</span></div>
+          <nav className="app-nav" aria-label="Views">
+            <a href="#/" aria-current={instructor ? undefined : 'page'}>Student</a>
+            <a href="#/instructor" aria-current={instructor ? 'page' : undefined}>Instructor</a>
+          </nav>
+          <Button variant="ghost" size="sm" icon={THEME_ICON[theme]} onClick={cycle}
+            aria-label={`Colour theme: ${theme}. Click to change.`} title={`Theme: ${theme}`} />
+        </header>
+        <div id="main" className="app-main">
+          {instructor ? <InstructorDashboard /> : <StudentApp />}
+        </div>
+      </div>
+    </ToastProvider>
   )
 }
 

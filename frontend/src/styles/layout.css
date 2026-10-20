@@ -1,0 +1,10 @@
+.app-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.app-header { position: sticky; top: 0; z-index: 10; height: 56px; display: flex; align-items: center; gap: var(--space-5); padding: 0 var(--space-5); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+.brand { display: flex; align-items: center; gap: var(--space-2); font-family: var(--font-serif); font-size: var(--text-lg); font-weight: 600; letter-spacing: -.01em; }
+.app-nav { display: flex; gap: var(--space-1); margin-right: auto; }
+.app-nav a { padding: 6px 12px; border-radius: var(--radius-sm); color: var(--text-muted); text-decoration: none; font-size: var(--text-sm); font-weight: 600; }
+.app-nav a:hover { background: var(--surface-muted); color: var(--text); }
+.app-nav a[aria-current='page'] { background: var(--accent-soft); color: var(--accent); }
+.app-main { flex: 1; display: flex; flex-direction: column; }
+.skip-link { position: absolute; left: -999px; top: 8px; z-index: 100; background: var(--surface); padding: 8px 12px; border-radius: var(--radius-sm); }
+.skip-link:focus { left: 8px; }
