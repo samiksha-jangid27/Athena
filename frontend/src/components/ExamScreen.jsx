@@ -6,6 +6,8 @@ import Icon from './ui/Icon.jsx'
 import Callout from './ui/Callout.jsx'
 import LockedPanel from './LockedPanel.jsx'
 import SubmitDialog from './SubmitDialog.jsx'
+import PracticalTask from './PracticalTask.jsx'
+import { usePractical } from '../hooks/usePractical.js'
 
 function Indicator({ ok, label }) {
   return <div className={`status-line ${ok ? 'ok' : 'bad'}`}><Icon name={ok ? 'check' : 'alert'} size={14} />{label}</div>
@@ -16,6 +18,9 @@ const FILTERS = [['all', 'All'], ['unanswered', 'Unanswered'], ['flagged', 'Flag
 export default function ExamScreen({ exam, camera, athena }) {
   const [current, setCurrent] = useState(0)
   const [filter, setFilter] = useState('all')
+  const [view, setView] = useState('questions') // questions | practical
+  const practical = usePractical(exam.token)
+  const practicalTask = practical.tasks?.[0]
   const [confirming, setConfirming] = useState(false)
   const [screenOk, setScreenOk] = useState(null)
   const [online, setOnline] = useState(navigator.onLine)
@@ -142,6 +147,14 @@ export default function ExamScreen({ exam, camera, athena }) {
 
       <div className="exam-body">
         <aside className="navigator" aria-label="Questions">
+          {practicalTask && (
+            <div className="view-tabs" role="tablist" aria-label="Exam sections">
+              <button type="button" role="tab" aria-selected={view === 'questions'} onClick={() => setView('questions')}>Questions</button>
+              <button type="button" role="tab" aria-selected={view === 'practical'} onClick={() => setView('practical')}>
+                Practical <span className="subtle num">{practicalTask.files.length}</span>
+              </button>
+            </div>
+          )}
           <div className="segmented" role="group" aria-label="Filter questions">
             {FILTERS.map(([value, label]) => (
               <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>
@@ -153,7 +166,7 @@ export default function ExamScreen({ exam, camera, athena }) {
           </div>
           <div className="question-grid">
             {visible.map(({ question: item, index, answered, flagged }) => (
-              <button key={item.id} type="button" onClick={() => setCurrent(index)}
+              <button key={item.id} type="button" onClick={() => { setView('questions'); setCurrent(index) }}
                 className={`q-chip ${index === current ? 'current' : ''} ${answered ? 'answered' : ''} ${flagged ? 'flagged' : ''}`}
                 aria-current={index === current ? 'true' : undefined}
                 aria-label={`Question ${index + 1}${answered ? ', answered' : ', not answered'}${flagged ? ', flagged' : ''}`}>
@@ -190,7 +203,7 @@ export default function ExamScreen({ exam, camera, athena }) {
               <Button size="sm" variant="secondary" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>Enter fullscreen</Button>
             </Callout>
           )}
-          {locked ? <LockedPanel confirmed={attempt?.status === 'locked'} isFullscreen={isFullscreen} lockedAt={exam.lockedAt} /> : (
+          {!locked && view === 'practical' && practicalTask ? <PracticalTask task={practicalTask} practical={practical} canEdit={canEdit} /> : locked ? <LockedPanel confirmed={attempt?.status === 'locked'} isFullscreen={isFullscreen} lockedAt={exam.lockedAt} /> : (
           <article className="question-card" aria-labelledby="question-text">
             <div className="question-meta">
               <span className="eyebrow">Question {current + 1} of {questions.length}</span>
@@ -217,16 +230,19 @@ export default function ExamScreen({ exam, camera, athena }) {
           </article>
           )}
 
-          <nav className="question-nav" aria-label="Question navigation">
+          <nav className="question-nav" aria-label="Question navigation" hidden={view === 'practical'}>
             <Button variant="secondary" icon="arrowLeft" disabled={current === 0} onClick={() => setCurrent(current - 1)}>Previous</Button>
             {isLast
               ? <Button iconRight="arrowRight" disabled={exam.submitting} onClick={() => setConfirming(true)}>Review and submit</Button>
               : <Button iconRight="arrowRight" onClick={() => setCurrent(current + 1)}>Next</Button>}
           </nav>
 
-          <SubmitDialog open={confirming} summary={summary} submitting={exam.submitting} error={exam.submitError}
+          {view === 'practical' && (
+            <nav className="question-nav"><span /><Button iconRight="arrowRight" onClick={() => setConfirming(true)}>Review and submit</Button></nav>
+          )}
+          <SubmitDialog open={confirming} summary={summary} practicalFiles={practicalTask ? practicalTask.files.length : null} submitting={exam.submitting} error={exam.submitError}
             onCancel={() => setConfirming(false)} onConfirm={exam.submit}
-            onJump={(index) => { setConfirming(false); setCurrent(index) }} />
+            onJump={(index) => { setConfirming(false); setView('questions'); setCurrent(index) }} />
         </main>
       </div>
     </div>

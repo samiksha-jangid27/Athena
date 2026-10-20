@@ -95,3 +95,23 @@
 .receipt div { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
 .receipt dt { color: var(--text-muted); }
 .receipt dd { margin: 0; font-weight: 600; }
+
+/* Section tabs and practical workspace */
+.view-tabs { display: flex; border-bottom: 1px solid var(--border); margin: calc(var(--space-2) * -1) 0 0; }
+.view-tabs button { flex: 1; border: 0; background: none; padding: var(--space-2); font-weight: 600; font-size: var(--text-sm); color: var(--text-muted); border-bottom: 2px solid transparent; cursor: pointer; }
+.view-tabs button[aria-selected='true'] { color: var(--text); border-bottom-color: var(--accent); }
+.practical { display: flex; flex-direction: column; gap: var(--space-5); }
+.practical-instructions { display: flex; flex-direction: column; gap: var(--space-3); color: var(--text-muted); max-width: 70ch; }
+.practical-section { display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.section-head h2 { font-size: var(--text-md); }
+.empty-line { font-size: var(--text-sm); color: var(--text-subtle); padding: var(--space-3); border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); }
+.file-list, .checkpoint-list, .test-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.file-list li { display: grid; grid-template-columns: auto 1fr auto auto auto; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); }
+.file-list li + li, .checkpoint-list li + li, .test-list li + li { border-top: 1px solid var(--border); }
+.file-name { font-weight: 600; overflow-wrap: anywhere; }
+.hash { font-size: 11px; color: var(--text-subtle); }
+.checkpoint-form { display: flex; align-items: flex-end; gap: var(--space-2); }
+.checkpoint-form .field { flex: 1; }
+.checkpoint-list li { display: grid; grid-template-columns: 72px auto 1fr; gap: var(--space-3); padding: var(--space-2) var(--space-3); font-size: var(--text-sm); align-items: baseline; }
+.test-list li { display: flex; flex-direction: column; padding: var(--space-2) var(--space-3); font-size: var(--text-sm); }
