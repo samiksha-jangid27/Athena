@@ -27,3 +27,4 @@ backend/data/runtime/
 # Runtime exam attempts (student data)
 backend/data/sessions.json
 backend/data/sessions.json.tmp
+backend/data/artifacts/

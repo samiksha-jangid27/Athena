@@ -1,0 +1,15 @@
+[
+  {
+    "id": "p1",
+    "title": "Secure preload bridge",
+    "instructions": "Write a preload script that exposes a single function, getVersion(), to the renderer using contextBridge. The renderer must not get access to ipcRenderer or Node APIs.\n\nSubmit your preload file and a short README explaining how you validated the IPC sender in the main process. Save a checkpoint when the first version works.",
+    "allowedExtensions": [".js", ".cjs", ".mjs", ".ts", ".json", ".md", ".txt", ".html", ".css", ".zip"],
+    "maxFileBytes": 1048576,
+    "maxFiles": 5,
+    "tests": [
+      { "id": "t1", "name": "Uses contextBridge", "description": "Preload calls contextBridge.exposeInMainWorld." },
+      { "id": "t2", "name": "No raw ipcRenderer", "description": "ipcRenderer is not exposed to the renderer." },
+      { "id": "t3", "name": "Sender validated", "description": "README explains how the main process validates the IPC sender." }
+    ]
+  }
+]

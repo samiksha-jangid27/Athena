@@ -151,3 +151,31 @@ test("exam info is public and does not leak questions", async () => {
   assert.ok(body.questionCount > 0);
   assert.ok(!("questions" in body));
 });
+
+test("practical uploads, checkpoints and instructor results", async () => {
+  const { token, attempt } = await startAttempt();
+  const tasks = (await call("GET", "/practical", { token })).body.tasks;
+  assert.ok(tasks.length > 0);
+  const taskId = tasks[0].id;
+  const content = Buffer.from("console.log(1)").toString("base64");
+
+  assert.equal((await call("POST", `/practical/${taskId}/files`, { token, body: { name: "x.exe", contentBase64: content } })).status, 400);
+  const uploaded = await call("POST", `/practical/${taskId}/files`, { token, body: { name: "../preload.js", contentBase64: content } });
+  assert.equal(uploaded.status, 201);
+  assert.equal(uploaded.body.file.name, "preload.js");
+  assert.equal((await call("POST", `/practical/${taskId}/checkpoints`, { token, body: { label: "v1" } })).status, 201);
+
+  const download = await fetch(`${baseUrl}/instructor/attempts/${attempt.sessionId}/files/${uploaded.body.file.id}`, { headers: { "x-instructor-key": KEY } });
+  assert.equal(await download.text(), "console.log(1)");
+  assert.equal((await fetch(`${baseUrl}/instructor/attempts/${attempt.sessionId}/files/${uploaded.body.file.id}`)).status, 401);
+
+  const testId = tasks[0].tests[0].id;
+  const graded = await call("PUT", `/instructor/attempts/${attempt.sessionId}/practical/${taskId}/tests/${testId}`, { key: KEY, body: { status: "pass" } });
+  assert.equal(graded.body.testResults[testId].status, "pass");
+  const review = await call("GET", `/instructor/attempts/${attempt.sessionId}/practical`, { key: KEY });
+  assert.equal(review.body[0].checkpoints.length, 1);
+
+  await call("POST", "/exam/submit", { token, body: {} });
+  const late = await call("POST", `/practical/${taskId}/files`, { token, body: { name: "late.js", contentBase64: content } });
+  assert.equal(late.status, 409);
+});

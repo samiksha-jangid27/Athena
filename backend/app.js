@@ -2,7 +2,10 @@
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 const rules = require("./lib/attempts");
+const practical = require("./lib/practical");
 const { createStore } = require("./lib/store");
 
 function hashToken(token) {
@@ -17,13 +20,23 @@ function sendError(res, status, message, extra = {}) {
   return res.status(status).json({ message, ...extra });
 }
 
-function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes = 10, examTitle = "Electron Fundamentals" }) {
+function createApp({
+  questionsPath, sessionsPath, instructorKey, durationMinutes = 10, examTitle = "Electron Fundamentals",
+  practicalPath = path.join(path.dirname(questionsPath), "practical.json"),
+  artifactsDir = path.join(path.dirname(sessionsPath), "artifacts"),
+}) {
   if (!instructorKey) throw new Error("instructorKey is required");
   const store = createStore({ questionsPath, sessionsPath });
+  const readTasks = () => (fs.existsSync(practicalPath) ? JSON.parse(fs.readFileSync(practicalPath, "utf-8")) : []);
+  // Stored files live under artifacts/<sessionId>/<fileId>-<name>. Both parts
+  // are generated or sanitised by the server, never taken raw from a client.
+  const artifactPath = (attempt, file) => path.join(artifactsDir, attempt.sessionId, `${file.id}-${file.name}`);
   const app = express();
 
   // Dev renderer (Vite) and the packaged file:// renderer (origin "null").
   app.use(cors({ origin: ["http://localhost:5173", "http://127.0.0.1:5173", "null"] }));
+  // Uploads (base64 files up to ~1 MB) get a larger body limit than the rest.
+  app.use("/practical", express.json({ limit: "2mb" }));
   app.use(express.json({ limit: "100kb" }));
 
   // Loads the attempt for the bearer token, or responds 401.
@@ -125,6 +138,65 @@ function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes
     res.json({ attempt: rules.publicAttempt(attempt), result: rules.score(attempt, questions) });
   }));
 
+  // ---------------- Practical assessment ----------------
+
+  function withTask(handler) {
+    return withAttempt((req, res, attempt, sessions) => {
+      const task = readTasks().find((item) => item.id === req.params.taskId);
+      if (!task) return sendError(res, 404, "Task not found");
+      if (attempt.status !== rules.STATUS.IN_PROGRESS) {
+        return sendError(res, 409, `attempt is ${attempt.status}`, { attempt: rules.publicAttempt(attempt) });
+      }
+      return handler(req, res, { attempt, sessions, task, state: practical.taskState(attempt, task.id) });
+    });
+  }
+
+  function publicTask(task, state) {
+    return {
+      id: task.id,
+      title: task.title,
+      instructions: task.instructions,
+      allowedExtensions: task.allowedExtensions,
+      maxFileBytes: task.maxFileBytes,
+      maxFiles: task.maxFiles,
+      tests: task.tests.map(({ id, name, description }) => ({ id, name, description })),
+      files: state.files,
+      checkpoints: state.checkpoints,
+    };
+  }
+
+  app.get("/practical", withAttempt((req, res, attempt) => {
+    res.json({
+      attempt: rules.publicAttempt(attempt),
+      tasks: readTasks().map((task) => publicTask(task, attempt.practical?.[task.id] || practical.emptyState())),
+    });
+  }));
+
+  app.post("/practical/:taskId/files", withTask((req, res, { attempt, sessions, task, state }) => {
+    const result = practical.validateUpload(task, state, req.body || {});
+    if (result.error) return sendError(res, 400, result.error);
+    const target = artifactPath(attempt, result.file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, result.bytes);
+    const file = practical.addFile(state, result.file);
+    store.saveSessions(sessions);
+    res.status(201).json({ file, task: publicTask(task, state) });
+  }));
+
+  app.delete("/practical/:taskId/files/:fileId", withTask((req, res, { sessions, task, state }) => {
+    // The stored bytes stay on disk because checkpoints may reference them.
+    if (!practical.removeFile(state, req.params.fileId)) return sendError(res, 404, "File not found");
+    store.saveSessions(sessions);
+    res.json({ task: publicTask(task, state) });
+  }));
+
+  app.post("/practical/:taskId/checkpoints", withTask((req, res, { sessions, task, state }) => {
+    const result = practical.addCheckpoint(state, req.body?.label);
+    if (result.error) return sendError(res, 400, result.error);
+    store.saveSessions(sessions);
+    res.status(201).json({ checkpoint: result.checkpoint, task: publicTask(task, state) });
+  }));
+
   // ---------------- Instructor ----------------
 
   app.use("/instructor", requireInstructor);
@@ -161,6 +233,36 @@ function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes
       res.json({ status: attempt.status, deadline: attempt.deadline });
     };
   }
+
+  app.get("/instructor/attempts/:sessionId/practical", (req, res) => {
+    const attempt = store.readSessions().find((item) => item.sessionId === req.params.sessionId);
+    if (!attempt) return sendError(res, 404, "Attempt not found");
+    res.json(readTasks().map((task) => {
+      const state = attempt.practical?.[task.id] || practical.emptyState();
+      return { ...publicTask(task, state), testResults: state.testResults };
+    }));
+  });
+
+  app.get("/instructor/attempts/:sessionId/files/:fileId", (req, res) => {
+    const attempt = store.readSessions().find((item) => item.sessionId === req.params.sessionId);
+    if (!attempt) return sendError(res, 404, "Attempt not found");
+    const files = Object.values(attempt.practical || {}).flatMap((state) => state.files);
+    const file = files.find((item) => item.id === req.params.fileId);
+    if (!file || !fs.existsSync(artifactPath(attempt, file))) return sendError(res, 404, "File not found");
+    res.download(artifactPath(attempt, file), file.name);
+  });
+
+  app.put("/instructor/attempts/:sessionId/practical/:taskId/tests/:testId", (req, res) => {
+    const sessions = store.readSessions();
+    const attempt = sessions.find((item) => item.sessionId === req.params.sessionId);
+    const task = readTasks().find((item) => item.id === req.params.taskId);
+    if (!attempt || !task) return sendError(res, 404, "Attempt or task not found");
+    const state = practical.taskState(attempt, task.id);
+    const error = practical.recordTestResult(task, state, req.params.testId, req.body || {});
+    if (error) return sendError(res, 400, error);
+    store.saveSessions(sessions);
+    res.json({ testResults: state.testResults });
+  });
 
   app.post("/instructor/attempts/:sessionId/extend",
     instructorAction((attempt, body) => rules.extend(attempt, Number(body.minutes))));
