@@ -30,6 +30,7 @@
 .q-chip:hover { border-color: var(--accent); }
 .q-chip.answered { background: var(--ink); border-color: var(--ink); color: var(--ink-text); }
 .q-chip.current { outline: 2px solid var(--accent); outline-offset: 1px; color: var(--text); }
+.q-chip.answered.current { color: var(--ink-text); }
 .q-flag { position: absolute; top: 4px; right: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--flag); }
 .q-chip.mini { display: inline-block; width: 14px; height: 14px; border-radius: 4px; cursor: default; vertical-align: middle; }
 .q-chip.mini .q-flag { top: 2px; right: 2px; width: 5px; height: 5px; }

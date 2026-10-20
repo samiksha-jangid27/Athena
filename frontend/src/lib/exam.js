@@ -124,7 +124,8 @@ export function syncLabel({ saveState, lastSavedAt, online }) {
   if (saveState === 'saving') return { tone: 'neutral', text: 'Saving…' }
   if (saveState === 'offline') return { tone: 'warning', text: 'Retrying save · answers kept on this device' }
   if (saveState === 'rejected') return { tone: 'danger', text: 'Not saved · attempt is locked or closed' }
-  if (!lastSavedAt) return { tone: 'neutral', text: 'No changes yet' }
+  // Nothing saved in this session yet, but the server copy is current.
+  if (!lastSavedAt) return { tone: 'success', text: 'Up to date' }
   const time = new Date(lastSavedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   return { tone: 'success', text: `Saved ${time}` }
 }

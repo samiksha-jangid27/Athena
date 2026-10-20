@@ -106,7 +106,7 @@ test('validateIdentity explains what is wrong', async () => {
 
 test('syncLabel never reports a save that did not happen', async () => {
   const { syncLabel } = await import('./exam.js')
-  assert.equal(syncLabel({ saveState: 'saved', lastSavedAt: null, online: true }).text, 'No changes yet')
+  assert.equal(syncLabel({ saveState: 'saved', lastSavedAt: null, online: true }).text, 'Up to date')
   assert.equal(syncLabel({ saveState: 'saved', lastSavedAt: Date.now(), online: true }).tone, 'success')
   assert.equal(syncLabel({ saveState: 'saved', lastSavedAt: Date.now(), online: false }).tone, 'warning')
   assert.equal(syncLabel({ saveState: 'offline', lastSavedAt: Date.now(), online: true }).tone, 'warning')
