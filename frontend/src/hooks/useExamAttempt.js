@@ -23,6 +23,7 @@ export function useExamAttempt() {
   // Events are only "synced" once the server has accepted them.
   const [eventState, setEventState] = useState({ pending: 0, rejected: 0 })
   const [pendingLock, setPendingLock] = useState(false)
+  const [lockedAt, setLockedAt] = useState(null)
   const [result, setResult] = useState(null)
   // loading | offline | stale | done
   const [recovery, setRecovery] = useState(() => (loadLocal()?.token ? 'loading' : 'done'))
@@ -91,7 +92,10 @@ export function useExamAttempt() {
   const logEvent = useCallback((type, detail) => {
     if (!stateRef.current.token) return
     // Lock answering locally right away; the server confirms the lock.
-    if (type === 'fullscreen-exit') setPendingLock(true)
+    if (type === 'fullscreen-exit') {
+      setPendingLock(true)
+      setLockedAt(Date.now())
+    }
     eventsRef.current.push(makeEvent(type, detail))
     setEventState((state) => ({ ...state, pending: eventsRef.current.length }))
     persist()
@@ -264,7 +268,7 @@ export function useExamAttempt() {
 
   return {
     phase, token, attempt, questions, examTitle, answers, flags, remaining, answerable,
-    pendingLock, saveState, lastSavedAt, eventState, result, submitting, submitError,
+    pendingLock, lockedAt, saveState, lastSavedAt, eventState, result, submitting, submitError,
     begin, recover, chooseAnswer, toggleFlag, logEvent, submit, reset,
   }
 }

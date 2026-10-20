@@ -4,6 +4,8 @@ import { answerSummary, filterQuestions, keyAction, timerLevel } from '../lib/na
 import Button from './ui/Button.jsx'
 import Icon from './ui/Icon.jsx'
 import Callout from './ui/Callout.jsx'
+import LockedPanel from './LockedPanel.jsx'
+import SubmitDialog from './SubmitDialog.jsx'
 
 function Indicator({ ok, label }) {
   return <div className={`status-line ${ok ? 'ok' : 'bad'}`}><Icon name={ok ? 'check' : 'alert'} size={14} />{label}</div>
@@ -188,13 +190,7 @@ export default function ExamScreen({ exam, camera, athena }) {
               <Button size="sm" variant="secondary" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>Enter fullscreen</Button>
             </Callout>
           )}
-          {locked && (
-            <Callout tone="danger" role="alert">
-              <strong>Answers locked.</strong> You left fullscreen.{' '}
-              {isFullscreen ? 'Waiting for your instructor to unlock this attempt.' : 'Return to fullscreen, then ask your instructor to unlock.'}
-            </Callout>
-          )}
-
+          {locked ? <LockedPanel confirmed={attempt?.status === 'locked'} isFullscreen={isFullscreen} lockedAt={exam.lockedAt} /> : (
           <article className="question-card" aria-labelledby="question-text">
             <div className="question-meta">
               <span className="eyebrow">Question {current + 1} of {questions.length}</span>
@@ -219,6 +215,7 @@ export default function ExamScreen({ exam, camera, athena }) {
               })}
             </div>
           </article>
+          )}
 
           <nav className="question-nav" aria-label="Question navigation">
             <Button variant="secondary" icon="arrowLeft" disabled={current === 0} onClick={() => setCurrent(current - 1)}>Previous</Button>
@@ -227,16 +224,9 @@ export default function ExamScreen({ exam, camera, athena }) {
               : <Button iconRight="arrowRight" onClick={() => setCurrent(current + 1)}>Next</Button>}
           </nav>
 
-          {confirming && (
-            <div className="confirm-box">
-              <p>{summary.answered} of {summary.total} answered{summary.flagged.length ? `, ${summary.flagged.length} flagged for review` : ''}. You cannot change answers after submitting.</p>
-              <div className="question-nav">
-                <Button variant="secondary" onClick={() => setConfirming(false)}>Keep working</Button>
-                <Button loading={exam.submitting} onClick={exam.submit}>Submit exam</Button>
-              </div>
-            </div>
-          )}
-          {exam.submitError && <Callout tone="danger" role="alert">{exam.submitError}</Callout>}
+          <SubmitDialog open={confirming} summary={summary} submitting={exam.submitting} error={exam.submitError}
+            onCancel={() => setConfirming(false)} onConfirm={exam.submit}
+            onJump={(index) => { setConfirming(false); setCurrent(index) }} />
         </main>
       </div>
     </div>

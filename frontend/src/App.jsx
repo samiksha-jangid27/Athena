@@ -43,7 +43,7 @@ function StudentApp() {
     return <RecoveryScreen kind={phase} onRetry={exam.recover} onStartOver={exam.reset} />
   }
   if (phase === 'finished') {
-    return <ResultScreen result={exam.result} status={exam.attempt?.status} onDone={() => {
+    return <ResultScreen result={exam.result} attempt={exam.attempt} onDone={() => {
       exam.reset()
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
     }} />
