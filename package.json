@@ -1,0 +1,41 @@
+{
+  "name": "athena-desktop-builder",
+  "version": "1.0.0",
+  "private": true,
+
+  "scripts": {
+    "build:frontend": "npm --prefix frontend run build",
+    "dist": "npm run build:frontend && electron-builder"
+  },
+
+  "devDependencies": {
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3"
+  },
+
+  "build": {
+    "appId": "com.athena.desktop",
+    "productName": "Athena",
+
+    "directories": {
+      "app": "frontend",
+      "output": "release"
+    },
+
+    "extraResources": [
+      {
+        "from": "backend",
+        "to": "backend"
+      }
+    ],
+
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.education"
+    },
+
+    "win": {
+      "target": "nsis"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+# Dependencies and build output
+node_modules/
+dist/
+release/
+out/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Private exam evidence and runtime data
+user-camera-snap/
+user-screen-snap/
+evidence/
+backend/data/sessions.json.bak
+backend/data/runtime/
+
+# OS / editor
+.DS_Store
+*.log
+.vscode/
+.idea/
