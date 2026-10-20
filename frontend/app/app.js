@@ -5,11 +5,11 @@ import fs from "node:fs";
 import http from "node:http";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
+import { isTrustedUrl, toSnapshotBytes } from "./ipc-validation.js";
 
 const DEV_URL = "http://localhost:5173";
 const BACKEND_URL = "http://127.0.0.1:3000/";
 const SNAPSHOT_INTERVAL_MS = 30000;
-const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 
 let mainWindow = null;
 let backendProcess = null;
@@ -135,8 +135,7 @@ function startProctoring() {
 // ---------------- IPC (validated) ----------------
 
 function isTrustedSender(event) {
-  const url = event.senderFrame?.url || "";
-  return app.isPackaged ? url.startsWith("file://") : url.startsWith(DEV_URL);
+  return isTrustedUrl(event.senderFrame?.url, { isPackaged: app.isPackaged, devUrl: DEV_URL });
 }
 
 function handle(channel, handler) {
@@ -157,13 +156,9 @@ handle("proctoring:stop", () => {
 });
 
 handle("proctoring:save-camera-snap", (bytes) => {
-  const isBytes = bytes instanceof ArrayBuffer || ArrayBuffer.isView(bytes);
-  if (!isBytes || bytes.byteLength === 0 || bytes.byteLength > MAX_SNAPSHOT_BYTES) {
-    throw new Error("Invalid camera snapshot");
-  }
-  const data = ArrayBuffer.isView(bytes)
-    ? Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-    : Buffer.from(bytes);
+  const valid = toSnapshotBytes(bytes);
+  if (!valid) throw new Error("Invalid camera snapshot");
+  const data = Buffer.from(valid.buffer, valid.byteOffset, valid.byteLength);
   fs.writeFileSync(path.join(evidenceDir("camera"), `${Date.now()}.jpg`), data);
   return true;
 });

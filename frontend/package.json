@@ -12,7 +12,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron": "electron ./app/app.js",
-    "test": "node --test src/lib/"
+    "test": "node --test src/lib/ app/"
   },
   "dependencies": {
     "cors": "^2.8.5",
