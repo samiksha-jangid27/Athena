@@ -143,6 +143,9 @@ function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes
       lastSavedAt: attempt.lastSavedAt || null,
       eventCount: (attempt.events || []).length,
       events: attempt.events || [],
+      extensions: attempt.extensions || [],
+      flags: attempt.flags || [],
+      serverTime: new Date().toISOString(),
       ...rules.score(attempt, questions),
     })));
   });
