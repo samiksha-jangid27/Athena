@@ -1,5 +1,5 @@
 // Electron main process for Athena.
-import { app, BrowserWindow, ipcMain, desktopCapturer, session } from "electron";
+import { app, BrowserWindow, ipcMain, desktopCapturer, session, systemPreferences } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
@@ -10,6 +10,11 @@ import { isTrustedUrl, toSnapshotBytes } from "./ipc-validation.js";
 const DEV_URL = "http://localhost:5173";
 const BACKEND_URL = "http://127.0.0.1:3000/";
 const SNAPSHOT_INTERVAL_MS = 30000;
+
+// Same name and data folder in dev and packaged builds (dev would
+// otherwise use "Electron").
+app.setName("Athena");
+app.setPath("userData", path.join(app.getPath("appData"), "Athena"));
 
 let mainWindow = null;
 let backendProcess = null;
@@ -116,6 +121,22 @@ async function captureScreen() {
   }
 }
 
+// Readiness check: can we capture the screen right now? On macOS this needs
+// the Screen Recording permission, which only the user can grant.
+async function checkScreenCapture() {
+  const permission = process.platform === "darwin"
+    ? systemPreferences.getMediaAccessStatus("screen")
+    : "granted";
+  let canCapture = false;
+  try {
+    const sources = await desktopCapturer.getSources({ types: ["screen"], thumbnailSize: { width: 320, height: 180 } });
+    canCapture = Boolean(sources[0] && !sources[0].thumbnail.isEmpty());
+  } catch (error) {
+    console.error("Screen capture check failed:", error);
+  }
+  return { permission, canCapture, platform: process.platform };
+}
+
 function stopProctoring() {
   clearInterval(snapshotTimer);
   snapshotTimer = null;
@@ -149,6 +170,8 @@ handle("proctoring:start", () => {
   startProctoring();
   return { intervalMs: SNAPSHOT_INTERVAL_MS };
 });
+
+handle("proctoring:check-screen", () => checkScreenCapture());
 
 handle("proctoring:stop", () => {
   stopProctoring();
