@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("athena", {
   startProctoring: () => ipcRenderer.invoke("proctoring:start"),
   stopProctoring: () => ipcRenderer.invoke("proctoring:stop"),
   checkScreenCapture: () => ipcRenderer.invoke("proctoring:check-screen"),
+  checkBackgroundApps: () => ipcRenderer.invoke("proctoring:check-apps"),
   saveCameraSnapshot: (bytes) => ipcRenderer.invoke("proctoring:save-camera-snap", bytes),
   onCameraSnapshotRequest: (callback) => subscribe("proctoring:camera-snap-request", callback),
   onScreenCaptureStatus: (callback) => subscribe("proctoring:screen-status", callback),

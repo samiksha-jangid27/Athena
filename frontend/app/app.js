@@ -6,6 +6,7 @@ import http from "node:http";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { isTrustedUrl, toSnapshotBytes } from "./ipc-validation.js";
+import { findDisallowed, listProcessNames } from "./background-apps.js";
 
 const DEV_URL = "http://localhost:5173";
 const BACKEND_URL = "http://127.0.0.1:3000/";
@@ -172,6 +173,16 @@ handle("proctoring:start", () => {
 });
 
 handle("proctoring:check-screen", () => checkScreenCapture());
+
+// Returns only the names of disallowed apps that are running.
+handle("proctoring:check-apps", async () => {
+  try {
+    return { supported: true, found: findDisallowed(await listProcessNames()) };
+  } catch (error) {
+    console.error("Background app check failed:", error);
+    return { supported: false, found: [] };
+  }
+});
 
 handle("proctoring:stop", () => {
   stopProctoring();

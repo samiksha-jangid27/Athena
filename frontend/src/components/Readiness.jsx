@@ -69,6 +69,7 @@ export default function Readiness({ camera, onBegin, athena }) {
   const [identity, setIdentity] = useState({ name: '', studentId: '' })
   const [touched, setTouched] = useState(false)
   const [screen, setScreen] = useState(athena ? { state: 'idle' } : { state: 'unsupported' })
+  const [apps, setApps] = useState(athena ? { state: 'idle', found: [] } : { state: 'unsupported', found: [] })
   const [agreed, setAgreed] = useState(false)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState('')
@@ -94,6 +95,16 @@ export default function Readiness({ camera, onBegin, athena }) {
       setScreen({ state: result.canCapture ? 'ok' : 'blocked', ...result })
     } catch {
       setScreen({ state: 'blocked' })
+    }
+  }
+
+  async function checkApps() {
+    setApps({ state: 'checking', found: [] })
+    try {
+      const result = await athena.checkBackgroundApps()
+      setApps({ state: result.supported ? (result.found.length ? 'found' : 'clear') : 'unsupported', found: result.found })
+    } catch {
+      setApps({ state: 'unsupported', found: [] })
     }
   }
 
@@ -203,6 +214,20 @@ export default function Readiness({ camera, onBegin, athena }) {
                   : screen.state === 'unsupported'
                     ? 'You are using the browser preview. Screenshots only work in the Athena desktop app.'
                     : 'Athena saves a screenshot about every 30 seconds during the exam.'}
+              </CheckRow>
+              <CheckRow icon="monitor" title="Other apps"
+                tone={apps.state === 'clear' ? 'success' : apps.state === 'found' || apps.state === 'unsupported' ? 'warning' : 'neutral'}
+                status={{ idle: 'Not checked', checking: 'Checking', clear: 'None found', found: `${apps.found.length} open`, unsupported: 'Not available' }[apps.state]}
+                action={athena && apps.state !== 'clear' && (
+                  <Button variant="secondary" size="sm" loading={apps.state === 'checking'} onClick={checkApps}>
+                    {apps.state === 'idle' ? 'Check apps' : 'Check again'}
+                  </Button>
+                )}>
+                {apps.state === 'found'
+                  ? `Close ${apps.found.join(', ')} before starting. Running them during the exam may breach exam rules.`
+                  : apps.state === 'unsupported'
+                    ? 'Athena cannot check other apps here. Close messaging, meeting, remote-desktop and AI apps yourself.'
+                    : 'Athena checks for common meeting, messaging, remote-desktop and AI apps. It only reads app names.'}
               </CheckRow>
             </div>
             <div className={`camera-frame ${camera.status === 'live' ? 'live' : ''}`}>
