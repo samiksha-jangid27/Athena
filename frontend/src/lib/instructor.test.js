@@ -42,3 +42,10 @@ test('validateExtension matches the server limits', () => {
   assert.match(validateExtension(''), /between 1 and 120/)
   assert.match(validateExtension('121'), /between 1 and 120/)
 })
+
+test('evidenceHint points to the right local evidence folder', async () => {
+  const { evidenceHint } = await import('./instructor.js')
+  assert.match(evidenceHint({ type: 'camera-lost' }), /camera/)
+  assert.match(evidenceHint({ type: 'fullscreen-exit' }), /screen/)
+  assert.equal(evidenceHint({ type: 'submitted' }), null)
+})

@@ -9,6 +9,7 @@ import Button from './ui/Button.jsx'
 import Callout from './ui/Callout.jsx'
 import Field from './ui/Field.jsx'
 import Icon from './ui/Icon.jsx'
+import AttemptDetail from './AttemptDetail.jsx'
 
 function SignIn({ onSubmit, error }) {
   const [value, setValue] = useState('')
@@ -131,17 +132,8 @@ export default function InstructorDashboard() {
         </div>
 
         {selected && (
-          <section className="timeline" aria-label={`Activity for ${selected.name}`}>
-            <h2>Activity timeline: {selected.name}</h2>
-            <ol>
-              {selected.events.map((event) => (
-                <li key={event.id || event.seq}>
-                  <time>{new Date(event.clientAt || event.receivedAt).toLocaleTimeString()}</time>
-                  <span>{event.type}</span>{event.detail && <small>{event.detail}</small>}
-                </li>
-              ))}
-            </ol>
-          </section>
+          <AttemptDetail key={selected.sessionId} attempt={selected} instructorKey={data.key} serverOffset={data.serverOffset}
+            now={now} onChanged={data.refresh} onClose={() => setSelectedId(null)} />
         )}
       </div>
     </main>

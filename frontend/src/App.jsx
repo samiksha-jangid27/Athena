@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import './App.css'
 import Readiness from './components/Readiness.jsx'
 import ExamScreen from './components/ExamScreen.jsx'
 import ResultScreen from './components/ResultScreen.jsx'

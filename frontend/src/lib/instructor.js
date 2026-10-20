@@ -47,3 +47,31 @@ export function validateExtension(value) {
   if (minutes < 1 || minutes > 120) return 'Choose between 1 and 120 minutes.'
   return null
 }
+
+export const EVENT_LABEL = {
+  'exam-started': 'Exam started',
+  'fullscreen-exit': 'Left fullscreen',
+  'fullscreen-enter': 'Returned to fullscreen',
+  'window-blur': 'Athena lost focus',
+  'window-focus': 'Athena regained focus',
+  'camera-lost': 'Camera interrupted',
+  'camera-restored': 'Camera restored',
+  'screen-capture-failed': 'Screen capture failed',
+  'screen-capture-restored': 'Screen capture restored',
+  'network-offline': 'Network lost',
+  'network-online': 'Network restored',
+  'answers-recovered': 'Attempt resumed after restart',
+  'instructor-unlocked': 'Unlocked by instructor',
+  'time-extended': 'Time extended',
+  submitted: 'Submitted',
+}
+
+// Where to find evidence for an event. Evidence stays on the student's
+// device, so this is a reference, not a link.
+export function evidenceHint(event) {
+  if (event.type === 'camera-lost' || event.type === 'camera-restored') return 'Camera photos: <userData>/evidence/camera'
+  if (event.type.startsWith('screen-capture') || event.type === 'window-blur' || event.type === 'fullscreen-exit') {
+    return 'Screenshots: <userData>/evidence/screen'
+  }
+  return null
+}
