@@ -4,6 +4,7 @@ import Readiness from './components/Readiness.jsx'
 import ExamScreen from './components/ExamScreen.jsx'
 import ResultScreen from './components/ResultScreen.jsx'
 import InstructorDashboard from './components/InstructorDashboard.jsx'
+import RecoveryScreen from './components/RecoveryScreen.jsx'
 import { useCamera } from './hooks/useCamera.js'
 import { useExamAttempt } from './hooks/useExamAttempt.js'
 
@@ -12,11 +13,10 @@ const athena = typeof window !== 'undefined' ? window.athena : undefined
 function StudentApp() {
   const camera = useCamera()
   const exam = useExamAttempt()
-  const status = exam.attempt?.status
-  const finished = status === 'submitted' || exam.result
+  const { phase } = exam
 
   // A recovered attempt needs the camera again after a restart.
-  const needsCamera = exam.token && !finished && camera.status === 'idle'
+  const needsCamera = phase === 'active' && camera.status === 'idle'
   const startCamera = camera.start
   useEffect(() => {
     if (needsCamera) startCamera()
@@ -25,17 +25,19 @@ function StudentApp() {
   // Release the camera once the exam is over.
   const stopCamera = camera.stop
   useEffect(() => {
-    if (finished) stopCamera()
-  }, [finished, stopCamera])
+    if (phase === 'finished') stopCamera()
+  }, [phase, stopCamera])
 
-  if (exam.recovering) return <main className="exam-layout single"><p>Loading…</p></main>
-  if (finished) {
-    return <ResultScreen result={exam.result} status={status} onDone={() => {
+  if (phase === 'loading' || phase.startsWith('recovery')) {
+    return <RecoveryScreen kind={phase} onRetry={exam.recover} onStartOver={exam.reset} />
+  }
+  if (phase === 'finished') {
+    return <ResultScreen result={exam.result} status={exam.attempt?.status} onDone={() => {
       exam.reset()
       if (document.fullscreenElement) document.exitFullscreen().catch(() => {})
     }} />
   }
-  if (exam.token && exam.questions.length) return <ExamScreen exam={exam} camera={camera} athena={athena} />
+  if (phase === 'active') return <ExamScreen exam={exam} camera={camera} athena={athena} />
   return <Readiness camera={camera} onBegin={exam.begin} isDesktop={Boolean(athena)} />
 }
 

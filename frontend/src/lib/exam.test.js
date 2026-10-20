@@ -76,3 +76,22 @@ test('local persistence round-trips and survives bad data', () => {
   data['athena.attempt'] = '{broken'
   assert.equal(loadLocal(storage), null)
 })
+
+test('examPhase picks recovery, finished, active and welcome screens', async () => {
+  const { examPhase } = await import('./exam.js')
+  assert.equal(examPhase({ recovery: 'loading' }), 'loading')
+  assert.equal(examPhase({ recovery: 'offline', token: 't' }), 'recovery-offline')
+  assert.equal(examPhase({ recovery: 'stale' }), 'recovery-stale')
+  assert.equal(examPhase({ recovery: 'done', token: 't', attempt: { status: 'submitted' } }), 'finished')
+  assert.equal(examPhase({ recovery: 'done', token: 't', attempt: { status: 'in-progress' }, result: { correct: 1 } }), 'finished')
+  assert.equal(examPhase({ recovery: 'done', token: 't', attempt: { status: 'locked' } }), 'active')
+  assert.equal(examPhase({ recovery: 'done', token: 't', attempt: { status: 'expired' } }), 'active')
+  assert.equal(examPhase({ recovery: 'done' }), 'welcome')
+})
+
+test('isRejection separates server refusals from network failures', async () => {
+  const { isRejection } = await import('./exam.js')
+  assert.equal(isRejection(new HttpError(409, {})), true)
+  assert.equal(isRejection(new HttpError(503, {})), false)
+  assert.equal(isRejection(new TypeError('Failed to fetch')), false)
+})

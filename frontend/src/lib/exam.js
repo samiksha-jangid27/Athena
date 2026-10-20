@@ -92,3 +92,18 @@ export function clearLocal(storage = globalThis.localStorage) {
     // ignore
   }
 }
+
+// Which screen the student should see, from the attempt state.
+export function examPhase({ recovery, token, attempt, result }) {
+  if (recovery === 'loading') return 'loading'
+  if (recovery === 'offline') return 'recovery-offline'
+  if (recovery === 'stale') return 'recovery-stale'
+  if (result || attempt?.status === 'submitted') return 'finished'
+  if (token && attempt) return 'active'
+  return 'welcome'
+}
+
+// Splits a failed request into "try again later" vs "server said no".
+export function isRejection(error) {
+  return error instanceof HttpError && error.status >= 400 && error.status < 500
+}

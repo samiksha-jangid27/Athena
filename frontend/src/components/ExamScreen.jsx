@@ -78,6 +78,10 @@ export default function ExamScreen({ exam, camera, athena }) {
   const question = questions[current]
   const answeredCount = Object.keys(answers).length
   const locked = attempt?.status === 'locked' || pendingLock
+  // A resumed attempt (after a restart) starts outside fullscreen. That is
+  // not a policy violation, but answering waits until fullscreen is back.
+  const needsFullscreen = !isFullscreen && !locked
+  const canEdit = answerable && isFullscreen
   const lowTime = exam.remaining < 60000
 
   return (
@@ -102,11 +106,20 @@ export default function ExamScreen({ exam, camera, athena }) {
           <Indicator ok={athena ? screenOk !== false : false} label={!athena ? 'Screen capture: desktop app only' : screenOk === false ? 'Screen capture blocked' : 'Screen snapshots on'} />
           <Indicator ok={isFullscreen} label={isFullscreen ? 'Fullscreen' : 'Not fullscreen'} />
           <Indicator ok={online && exam.saveState !== 'offline'} label={SAVE_TEXT[exam.saveState]} />
+          <Indicator ok={exam.eventState.pending === 0 && exam.eventState.rejected === 0}
+            label={exam.eventState.rejected ? `${exam.eventState.rejected} activity events rejected`
+              : exam.eventState.pending ? `${exam.eventState.pending} activity events waiting to send` : 'Activity log synced'} />
           {camera.status !== 'live' && <button className="text-button" onClick={camera.start}>Reconnect camera</button>}
         </div>
       </aside>
 
       <section className="question-area">
+        {needsFullscreen && (
+          <div className="lock-banner" role="alert">
+            <strong>Fullscreen required.</strong> Return to fullscreen to continue answering.
+            <button className="secondary-button" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>Enter fullscreen</button>
+          </div>
+        )}
         {locked && (
           <div className="lock-banner" role="alert">
             <strong>Answers locked.</strong> You left fullscreen.
@@ -116,7 +129,7 @@ export default function ExamScreen({ exam, camera, athena }) {
         )}
         <div className="question-topline">
           <span>Question {current + 1} <small>of {questions.length}</small></span>
-          <button className={`flag-button ${flags.includes(question?.id) ? 'on' : ''}`} disabled={!answerable} onClick={() => exam.toggleFlag(question.id)}>
+          <button className={`flag-button ${flags.includes(question?.id) ? 'on' : ''}`} disabled={!canEdit} onClick={() => exam.toggleFlag(question.id)}>
             {flags.includes(question?.id) ? '⚑ Flagged for review' : '⚐ Flag for review'}
           </button>
         </div>
@@ -125,7 +138,7 @@ export default function ExamScreen({ exam, camera, athena }) {
           <h2>{question?.question}</h2>
           <div className="option-list">
             {question?.options.map((option, index) => (
-              <button key={option} disabled={!answerable} onClick={() => exam.chooseAnswer(question.id, index)}
+              <button key={option} disabled={!canEdit} onClick={() => exam.chooseAnswer(question.id, index)}
                 className={`option ${answers[question.id] === index ? 'selected' : ''}`}>
                 <span className="option-key">{String.fromCharCode(65 + index)}</span>
                 <span>{option}</span>
