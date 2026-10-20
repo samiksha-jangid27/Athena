@@ -1,221 +1,181 @@
+// Athena exam backend: a small Express server backed by JSON files.
+// Good enough for local development and demos; see README for what a
+// production deployment still needs.
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const rules = require("./lib/attempts");
 
-const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+const DURATION_MINUTES = Number(process.env.ATHENA_EXAM_MINUTES) || 10;
 
-app.use(cors());
-app.use(express.json());
+// Instructor endpoints need this key. If none is configured we generate one
+// per run and print it, so there is never a hard-coded default secret.
+const INSTRUCTOR_KEY =
+  process.env.ATHENA_INSTRUCTOR_KEY || crypto.randomBytes(12).toString("hex");
 
 const questionsPath =
-  process.env.ATHENA_QUESTIONS_PATH ||
-  path.join(__dirname, "data", "questions.json");
-
+  process.env.ATHENA_QUESTIONS_PATH || path.join(__dirname, "data", "questions.json");
 const sessionsPath =
-  process.env.ATHENA_SESSIONS_PATH ||
-  path.join(__dirname, "data", "sessions.json");
+  process.env.ATHENA_SESSIONS_PATH || path.join(__dirname, "data", "sessions.json");
 
 function readQuestions() {
   return JSON.parse(fs.readFileSync(questionsPath, "utf-8"));
 }
 
 function readSessions() {
+  if (!fs.existsSync(sessionsPath)) return [];
   return JSON.parse(fs.readFileSync(sessionsPath, "utf-8"));
 }
 
+// Write to a temp file then rename, so a crash never leaves half a file.
 function saveSessions(sessions) {
-  fs.writeFileSync(sessionsPath, JSON.stringify(sessions, null, 2));
+  const tempPath = `${sessionsPath}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(sessions, null, 2));
+  fs.renameSync(tempPath, sessionsPath);
 }
 
-function makeSessionId() {
-  return `session-${Date.now()}`;
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function questionForStudent(question) {
-  return {
-    id: question.id,
-    question: question.question,
-    options: question.options,
+  return { id: question.id, question: question.question, options: question.options };
+}
+
+const app = express();
+
+// Dev renderer (Vite) and the packaged file:// renderer (origin "null").
+app.use(cors({ origin: ["http://localhost:5173", "http://127.0.0.1:5173", "null"] }));
+app.use(express.json({ limit: "100kb" }));
+
+// Loads the attempt for the bearer token, or responds 401.
+function withAttempt(handler) {
+  return (req, res) => {
+    const token = (req.get("authorization") || "").replace(/^Bearer /, "");
+    if (!token) return res.status(401).json({ message: "Missing token" });
+    const sessions = readSessions();
+    const attempt = sessions.find((item) => item.tokenHash === hashToken(token));
+    if (!attempt) return res.status(401).json({ message: "Invalid token" });
+    rules.refreshStatus(attempt);
+    return handler(req, res, attempt, sessions);
   };
 }
 
+function requireInstructor(req, res, next) {
+  const key = req.get("x-instructor-key") || "";
+  const valid =
+    key.length === INSTRUCTOR_KEY.length &&
+    crypto.timingSafeEqual(Buffer.from(key), Buffer.from(INSTRUCTOR_KEY));
+  if (!valid) return res.status(401).json({ message: "Invalid instructor key" });
+  next();
+}
+
 app.get("/", (req, res) => {
-  res.json({ message: "Exam backend is running" });
+  res.json({ message: "Athena backend is running", serverTime: new Date().toISOString() });
 });
 
-// Start a new exam session
+// ---------------- Student ----------------
+
 app.post("/exam/start", (req, res) => {
-  const { userId, name } = req.body;
-
-  if (!userId || !name) {
-    return res.status(400).json({
-      message: "userId and name are required",
-    });
+  const { userId, name } = req.body || {};
+  if (typeof userId !== "string" || typeof name !== "string" || !userId.trim() || !name.trim()) {
+    return res.status(400).json({ message: "userId and name are required" });
   }
-
   const sessions = readSessions();
-
-  const session = {
-    sessionId: makeSessionId(),
-    userId,
-    name,
-    startedAt: new Date().toISOString(),
-    submittedAt: null,
-    status: "in-progress",
-    attempted: 0,
-    correct: 0,
-    wrong: 0,
-    answers: [],
-  };
-
-  sessions.push(session);
+  const { token, ...attempt } = rules.createAttempt({
+    userId: userId.trim().slice(0, 64),
+    name: name.trim().slice(0, 64),
+    durationMs: DURATION_MINUTES * 60000,
+  });
+  attempt.tokenHash = hashToken(token);
+  sessions.push(attempt);
   saveSessions(sessions);
-
   res.status(201).json({
-    message: "Exam session started",
-    sessionId: session.sessionId,
+    token,
+    attempt: rules.publicAttempt(attempt),
+    questions: readQuestions().map(questionForStudent),
   });
 });
 
-// Get one question
-app.get("/exam/mcq/:id", (req, res) => {
-  const questions = readQuestions();
-  const id = Number(req.params.id);
-
-  const question = questions.find((item) => item.id === id);
-
-  if (!question) {
-    return res.status(404).json({ message: "Question not found" });
-  }
-
-  res.json(questionForStudent(question));
-});
-
-// Get all questions without correct answers
-app.get("/exam/mcq", (req, res) => {
-  const questions = readQuestions();
-  res.json(questions.map(questionForStudent));
-});
-
-// Submit one answer
-app.post("/exam/answer", (req, res) => {
-  const { sessionId, questionId, selectedAnswer } = req.body;
-
-  if (!sessionId || questionId === undefined || selectedAnswer === undefined) {
-    return res.status(400).json({
-      message: "sessionId, questionId and selectedAnswer are required",
-    });
-  }
-
-  const questions = readQuestions();
-  const sessions = readSessions();
-
-  const question = questions.find(
-    (item) => item.id === Number(questionId)
-  );
-
-  if (!question) {
-    return res.status(404).json({ message: "Question not found" });
-  }
-
-  const session = sessions.find(
-    (item) => item.sessionId === sessionId
-  );
-
-  if (!session) {
-    return res.status(404).json({ message: "Session not found" });
-  }
-
-  if (session.status !== "in-progress") {
-    return res.status(400).json({ message: "Exam is already submitted" });
-  }
-
-  const existingAnswer = session.answers.find(
-    (answer) => answer.questionId === Number(questionId)
-  );
-
-  const isCorrect = Number(selectedAnswer) === question.correctAnswer;
-
-  if (existingAnswer) {
-    if (existingAnswer.isCorrect) session.correct -= 1;
-    else session.wrong -= 1;
-    existingAnswer.selectedAnswer = Number(selectedAnswer);
-    existingAnswer.isCorrect = isCorrect;
-    existingAnswer.answeredAt = new Date().toISOString();
-  } else {
-    session.answers.push({
-      questionId: question.id,
-      selectedAnswer: Number(selectedAnswer),
-      isCorrect,
-      answeredAt: new Date().toISOString(),
-    });
-    session.attempted += 1;
-  }
-
-  if (isCorrect) session.correct += 1;
-  else session.wrong += 1;
-
-  saveSessions(sessions);
-
+// Used for crash recovery and as a heartbeat (picks up time extensions).
+app.get("/exam/attempt", withAttempt((req, res, attempt, sessions) => {
+  saveSessions(sessions); // persist any status change from refreshStatus
   res.json({
-    message: "Answer saved",
-    isCorrect,
-    attempted: session.attempted,
-    correct: session.correct,
-    wrong: session.wrong,
+    attempt: rules.publicAttempt(attempt),
+    questions: readQuestions().map(questionForStudent),
   });
-});
+}));
 
-// Get current session progress
-app.get("/exam/session/:sessionId", (req, res) => {
-  const sessions = readSessions();
-
-  const session = sessions.find(
-    (item) => item.sessionId === req.params.sessionId
-  );
-
-  if (!session) {
-    return res.status(404).json({ message: "Session not found" });
-  }
-
-  res.json(session);
-});
-
-// Submit the whole exam
-app.post("/exam/submit", (req, res) => {
-  const { sessionId } = req.body;
-
-  if (!sessionId) {
-    return res.status(400).json({ message: "sessionId is required" });
-  }
-
-  const sessions = readSessions();
-
-  const session = sessions.find(
-    (item) => item.sessionId === sessionId
-  );
-
-  if (!session) {
-    return res.status(404).json({ message: "Session not found" });
-  }
-
-  session.status = "submitted";
-  session.submittedAt = new Date().toISOString();
-
+// Saves the full answer set. Idempotent, so the client can retry safely.
+app.put("/exam/answers", withAttempt((req, res, attempt, sessions) => {
+  const error = rules.saveAnswers(attempt, req.body || {}, readQuestions());
   saveSessions(sessions);
+  if (error) return res.status(409).json({ message: error, attempt: rules.publicAttempt(attempt) });
+  res.json({ attempt: rules.publicAttempt(attempt) });
+}));
 
-  res.json({
-    message: "Exam submitted successfully",
-    result: {
-      attempted: session.attempted,
-      correct: session.correct,
-      wrong: session.wrong,
-    },
-  });
+app.post("/exam/events", withAttempt((req, res, attempt, sessions) => {
+  const error = rules.recordEvents(attempt, req.body?.events);
+  if (error) return res.status(400).json({ message: error });
+  saveSessions(sessions);
+  res.json({ attempt: rules.publicAttempt(attempt) });
+}));
+
+app.post("/exam/submit", withAttempt((req, res, attempt, sessions) => {
+  if (req.body?.answers && attempt.status === rules.STATUS.IN_PROGRESS) {
+    rules.saveAnswers(attempt, req.body, readQuestions());
+  }
+  rules.submit(attempt);
+  saveSessions(sessions);
+  res.json({ attempt: rules.publicAttempt(attempt), result: rules.score(attempt, readQuestions()) });
+}));
+
+// ---------------- Instructor ----------------
+
+app.use("/instructor", requireInstructor);
+
+app.get("/instructor/attempts", (req, res) => {
+  const questions = readQuestions();
+  const sessions = readSessions().map((attempt) => rules.refreshStatus(attempt));
+  res.json(sessions.map((attempt) => ({
+    sessionId: attempt.sessionId,
+    userId: attempt.userId,
+    name: attempt.name,
+    status: attempt.status,
+    startedAt: attempt.startedAt,
+    deadline: attempt.deadline,
+    submittedAt: attempt.submittedAt,
+    lastSavedAt: attempt.lastSavedAt || null,
+    eventCount: (attempt.events || []).length,
+    events: attempt.events || [],
+    ...rules.score(attempt, questions),
+  })));
 });
 
-app.listen(PORT, "127.0.0.1", ()  => {
-  console.log(`Exam backend running at http://localhost:${PORT}`);
+function instructorAction(action) {
+  return (req, res) => {
+    const sessions = readSessions();
+    const attempt = sessions.find((item) => item.sessionId === req.params.sessionId);
+    if (!attempt) return res.status(404).json({ message: "Attempt not found" });
+    const error = action(attempt, req.body || {});
+    if (error) return res.status(409).json({ message: error });
+    saveSessions(sessions);
+    res.json({ status: attempt.status, deadline: attempt.deadline });
+  };
+}
+
+app.post("/instructor/attempts/:sessionId/extend",
+  instructorAction((attempt, body) => rules.extend(attempt, Number(body.minutes))));
+
+app.post("/instructor/attempts/:sessionId/unlock",
+  instructorAction((attempt) => rules.unlock(attempt)));
+
+app.listen(PORT, "127.0.0.1", () => {
+  console.log(`Athena backend running at http://127.0.0.1:${PORT}`);
+  if (!process.env.ATHENA_INSTRUCTOR_KEY) {
+    console.log(`Instructor key for this run: ${INSTRUCTOR_KEY}`);
+  }
 });

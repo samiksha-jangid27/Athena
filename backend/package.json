@@ -1,11 +1,12 @@
 {
-  "name": "exam-backend",
+  "name": "athena-backend",
   "version": "1.0.0",
-  "description": "Simple Express backend for an Electron exam application",
+  "description": "Athena exam backend (Express + JSON files)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node --test test/"
   },
   "dependencies": {
     "cors": "^2.8.5",
