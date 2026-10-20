@@ -1,74 +1,80 @@
-/* Athena design tokens. Olive and laurel for wisdom, bronze for attention.
-   Light is the default; dark follows the OS unless the user picks a theme. */
+/* Athena design tokens.
+   Monochrome base (ink, graphite, paper) with a single precise blue accent.
+   Blue means "interactive / focus"; red, amber and green are reserved for
+   status only. Light follows the OS by default; users can pick a theme. */
 :root {
-  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
-  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
-  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI Variable', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-display: var(--font-sans);
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
   --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
-  --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
-  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px; --radius-pill: 999px;
-  --text-xs: 12px; --text-sm: 13px; --text-md: 15px; --text-lg: 18px; --text-xl: 24px; --text-2xl: 34px; --text-3xl: 48px;
+  --space-5: 20px; --space-6: 28px; --space-7: 40px; --space-8: 56px;
+  --radius-sm: 3px; --radius-md: 5px; --radius-lg: 7px; --radius-pill: 999px;
+  --text-xs: 11.5px; --text-sm: 13px; --text-md: 14px; --text-lg: 16px; --text-xl: 20px; --text-2xl: 26px; --text-3xl: 34px;
   --ease: cubic-bezier(.2, .7, .2, 1);
-  --dur: 160ms;
+  --dur: 120ms;
 
-  --bg: #f5f4ee;
-  --bg-elevated: #fbfaf6;
+  --bg: #f6f7f9;
+  --bg-elevated: #ffffff;
   --surface: #ffffff;
-  --surface-muted: #f0efe7;
-  --border: #e2e0d4;
-  --border-strong: #cdcab9;
-  --text: #1c211b;
-  --text-muted: #5f665b;
-  --text-subtle: #7d8478;
-  --accent: #3f6b45;
-  --accent-hover: #335a39;
-  --accent-soft: #e6efe2;
+  --surface-muted: #eef0f3;
+  --border: #dfe2e7;
+  --border-strong: #c3c8d0;
+  --text: #0b0d12;
+  --text-muted: #4d5462;
+  --text-subtle: #737a88;
+  --accent: #1d4ed8;
+  --accent-hover: #1a43ba;
+  --accent-soft: #e8eefc;
   --accent-text: #ffffff;
-  --gold: #a87516;
-  --gold-soft: #f7ecd4;
-  --danger: #b2412b;
-  --danger-soft: #fbe7e1;
-  --warning: #9a6b06;
-  --warning-soft: #fbf1d6;
-  --success: #2f7a45;
-  --success-soft: #e2f2e5;
-  --info: #3b5f8a;
-  --info-soft: #e5edf7;
-  --focus: #3b78d8;
-  --shadow-sm: 0 1px 2px rgba(28, 33, 27, .06);
-  --shadow-md: 0 8px 24px rgba(28, 33, 27, .08);
-  --shadow-lg: 0 24px 60px rgba(28, 33, 27, .16);
-  --backdrop: rgba(20, 24, 19, .45);
+  --ink: #0b0d12;
+  --ink-text: #ffffff;
+  --flag: #b45309;
+  --flag-soft: #fdf1e3;
+  --danger: #c0262d;
+  --danger-soft: #fdeceb;
+  --warning: #a15c07;
+  --warning-soft: #fdf3e2;
+  --success: #15803d;
+  --success-soft: #e7f5ec;
+  --info: #1d4ed8;
+  --info-soft: #e8eefc;
+  --focus: #2563eb;
+  --shadow-sm: 0 1px 0 rgba(11, 13, 18, .04);
+  --shadow-md: 0 6px 18px rgba(11, 13, 18, .08);
+  --shadow-lg: 0 18px 48px rgba(11, 13, 18, .18);
+  --backdrop: rgba(5, 7, 10, .55);
   color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #121511; --bg-elevated: #171b16; --surface: #1c211b; --surface-muted: #232922;
-    --border: #2e352d; --border-strong: #3d463c;
-    --text: #ecefe8; --text-muted: #a7afa2; --text-subtle: #868e82;
-    --accent: #8cc08f; --accent-hover: #a2d0a4; --accent-soft: #24331f; --accent-text: #10170f;
-    --gold: #e0b45c; --gold-soft: #3a2f17;
-    --danger: #f08a73; --danger-soft: #3d201a; --warning: #e6c05e; --warning-soft: #362d14;
-    --success: #7fcf8f; --success-soft: #1c3322; --info: #8fb3e3; --info-soft: #1d2a3b;
-    --focus: #7fb0ff;
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-md: 0 8px 24px rgba(0, 0, 0, .35); --shadow-lg: 0 24px 60px rgba(0, 0, 0, .5);
-    --backdrop: rgba(0, 0, 0, .6);
+    --bg: #08090b; --bg-elevated: #0e1013; --surface: #121418; --surface-muted: #191c21;
+    --border: #23272e; --border-strong: #343944;
+    --text: #f1f3f6; --text-muted: #a3aab6; --text-subtle: #7b8290;
+    --accent: #5b8cff; --accent-hover: #7aa2ff; --accent-soft: #14213d; --accent-text: #050a17;
+    --ink: #f1f3f6; --ink-text: #08090b;
+    --flag: #f0a54a; --flag-soft: #2d1f0d;
+    --danger: #ff6b6b; --danger-soft: #2c1214; --warning: #f2b347; --warning-soft: #2b2010;
+    --success: #4ade80; --success-soft: #0f2618; --info: #7aa2ff; --info-soft: #14213d;
+    --focus: #7aa2ff;
+    --shadow-sm: none; --shadow-md: 0 6px 18px rgba(0, 0, 0, .5); --shadow-lg: 0 18px 48px rgba(0, 0, 0, .7);
+    --backdrop: rgba(0, 0, 0, .7);
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --bg: #121511; --bg-elevated: #171b16; --surface: #1c211b; --surface-muted: #232922;
-  --border: #2e352d; --border-strong: #3d463c;
-  --text: #ecefe8; --text-muted: #a7afa2; --text-subtle: #868e82;
-  --accent: #8cc08f; --accent-hover: #a2d0a4; --accent-soft: #24331f; --accent-text: #10170f;
-  --gold: #e0b45c; --gold-soft: #3a2f17;
-  --danger: #f08a73; --danger-soft: #3d201a; --warning: #e6c05e; --warning-soft: #362d14;
-  --success: #7fcf8f; --success-soft: #1c3322; --info: #8fb3e3; --info-soft: #1d2a3b;
-  --focus: #7fb0ff;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-md: 0 8px 24px rgba(0, 0, 0, .35); --shadow-lg: 0 24px 60px rgba(0, 0, 0, .5);
-  --backdrop: rgba(0, 0, 0, .6);
+  --bg: #08090b; --bg-elevated: #0e1013; --surface: #121418; --surface-muted: #191c21;
+  --border: #23272e; --border-strong: #343944;
+  --text: #f1f3f6; --text-muted: #a3aab6; --text-subtle: #7b8290;
+  --accent: #5b8cff; --accent-hover: #7aa2ff; --accent-soft: #14213d; --accent-text: #050a17;
+  --ink: #f1f3f6; --ink-text: #08090b;
+  --flag: #f0a54a; --flag-soft: #2d1f0d;
+  --danger: #ff6b6b; --danger-soft: #2c1214; --warning: #f2b347; --warning-soft: #2b2010;
+  --success: #4ade80; --success-soft: #0f2618; --info: #7aa2ff; --info-soft: #14213d;
+  --focus: #7aa2ff;
+  --shadow-sm: none; --shadow-md: 0 6px 18px rgba(0, 0, 0, .5); --shadow-lg: 0 18px 48px rgba(0, 0, 0, .7);
+  --backdrop: rgba(0, 0, 0, .7);
   color-scheme: dark;
 }
