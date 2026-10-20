@@ -95,3 +95,11 @@ test('isRejection separates server refusals from network failures', async () => 
   assert.equal(isRejection(new HttpError(503, {})), false)
   assert.equal(isRejection(new TypeError('Failed to fetch')), false)
 })
+
+test('validateIdentity explains what is wrong', async () => {
+  const { validateIdentity } = await import('./exam.js')
+  assert.deepEqual(validateIdentity({ name: 'Asha Rao', studentId: 'CS-2041' }), {})
+  assert.match(validateIdentity({ name: ' ', studentId: 'CS-2041' }).name, /full name/)
+  assert.match(validateIdentity({ name: 'A', studentId: 'CS-2041' }).name, /too short/)
+  assert.match(validateIdentity({ name: 'Asha', studentId: 'a b' }).studentId, /letters, numbers/)
+})

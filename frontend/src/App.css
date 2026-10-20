@@ -9,7 +9,6 @@
 /* Readiness */
 .instructions { padding-left: 18px; color: #4f5c53; font-size: 14px; line-height: 1.6; max-width: 420px; }.instructions li { margin-bottom: 8px; }
 .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 22px 0; }.form-row label { display: flex; flex-direction: column; gap: 6px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .8px; }
-input[type=text], input:not([type]), input[type=password] { border: 1px solid var(--line); background: #fff; border-radius: 3px; padding: 10px 12px; font-size: 14px; color: var(--ink); }
 .camera-preview { width: 100%; max-height: 220px; object-fit: cover; background: #111; border-radius: 3px; margin: 14px 0; }.camera-preview.hidden { display: none; }
 .agree { display: flex; gap: 10px; align-items: flex-start; font-size: 12px; color: #4f5c53; padding: 14px 0; }
 /* Exam */

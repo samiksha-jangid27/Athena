@@ -42,7 +42,7 @@ function StudentApp() {
     }} />
   }
   if (phase === 'active') return <ExamScreen exam={exam} camera={camera} athena={athena} />
-  return <Readiness camera={camera} onBegin={exam.begin} isDesktop={Boolean(athena)} />
+  return <Readiness camera={camera} onBegin={exam.begin} athena={athena} />
 }
 
 const THEME_ICON = { system: 'monitor', light: 'sun', dark: 'moon' }

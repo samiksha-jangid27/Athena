@@ -107,3 +107,13 @@ export function examPhase({ recovery, token, attempt, result }) {
 export function isRejection(error) {
   return error instanceof HttpError && error.status >= 400 && error.status < 500
 }
+
+// Student identification rules (mirrored loosely by the server's limits).
+export function validateIdentity({ name, studentId }) {
+  const errors = {}
+  if (!name.trim()) errors.name = 'Enter your full name.'
+  else if (name.trim().length < 2) errors.name = 'Name looks too short.'
+  if (!studentId.trim()) errors.studentId = 'Enter your student ID.'
+  else if (!/^[A-Za-z0-9-]{3,32}$/.test(studentId.trim())) errors.studentId = 'Use 3–32 letters, numbers or dashes.'
+  return errors
+}

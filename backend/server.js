@@ -13,6 +13,7 @@ const instructorKey =
 const app = createApp({
   instructorKey,
   durationMinutes: Number(process.env.ATHENA_EXAM_MINUTES) || 10,
+  examTitle: process.env.ATHENA_EXAM_TITLE || "Electron Fundamentals",
   questionsPath:
     process.env.ATHENA_QUESTIONS_PATH || path.join(__dirname, "data", "questions.json"),
   sessionsPath:

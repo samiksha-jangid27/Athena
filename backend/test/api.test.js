@@ -143,3 +143,11 @@ test("events after submission are rejected with a conflict", async () => {
   assert.equal(late.status, 409);
   assert.equal(late.body.attempt.status, "submitted");
 });
+
+test("exam info is public and does not leak questions", async () => {
+  const { status, body } = await call("GET", "/exam/info");
+  assert.equal(status, 200);
+  assert.equal(body.durationMinutes, 10);
+  assert.ok(body.questionCount > 0);
+  assert.ok(!("questions" in body));
+});

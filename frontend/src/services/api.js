@@ -26,6 +26,7 @@ async function request(path, { method = 'GET', token, instructorKey, body, timeo
 
 export const api = {
   health: () => request('/', { timeoutMs: 3000 }),
+  info: () => request('/exam/info', { timeoutMs: 3000 }),
   start: (userId, name) => request('/exam/start', { method: 'POST', body: { userId, name } }),
   getAttempt: (token) => request('/exam/attempt', { token }),
   saveAnswers: (token, answers, flags) => request('/exam/answers', { method: 'PUT', token, body: { answers, flags } }),

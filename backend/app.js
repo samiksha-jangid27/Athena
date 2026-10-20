@@ -17,7 +17,7 @@ function sendError(res, status, message, extra = {}) {
   return res.status(status).json({ message, ...extra });
 }
 
-function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes = 10 }) {
+function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes = 10, examTitle = "Electron Fundamentals" }) {
   if (!instructorKey) throw new Error("instructorKey is required");
   const store = createStore({ questionsPath, sessionsPath });
   const app = express();
@@ -53,6 +53,17 @@ function createApp({ questionsPath, sessionsPath, instructorKey, durationMinutes
   });
 
   // ---------------- Student ----------------
+
+  // Public exam summary for the welcome screen (no questions or answers).
+  app.get("/exam/info", (req, res) => {
+    res.json({
+      title: examTitle,
+      durationMinutes,
+      questionCount: store.readQuestions().length,
+      lockOnFullscreenExit: true,
+      snapshotIntervalSeconds: 30,
+    });
+  });
 
   app.post("/exam/start", (req, res) => {
     const { userId, name } = req.body || {};
