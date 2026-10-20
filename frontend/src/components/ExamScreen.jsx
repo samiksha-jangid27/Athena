@@ -1,14 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { formatDuration } from '../lib/exam.js'
+import { answerSummary, filterQuestions, keyAction, timerLevel } from '../lib/navigation.js'
+import Button from './ui/Button.jsx'
+import Icon from './ui/Icon.jsx'
+import Callout from './ui/Callout.jsx'
 
 const SAVE_TEXT = { saved: 'All answers saved', saving: 'Saving…', offline: 'Offline, saved on this device', rejected: 'Not saved: answers are locked' }
 
 function Indicator({ ok, label }) {
-  return <div className={`indicator ${ok ? 'ok' : 'bad'}`}><span className="status-dot" />{label}</div>
+  return <div className={`status-line ${ok ? 'ok' : 'bad'}`}><Icon name={ok ? 'check' : 'alert'} size={14} />{label}</div>
 }
 
-export default function ExamScreen({ exam, camera, athena }) {
+const FILTERS = [['all', 'All'], ['unanswered', 'Unanswered'], ['flagged', 'Flagged']]
+
+export default function ExamScreen({ exam, camera, athena, examTitle = 'Exam' }) {
   const [current, setCurrent] = useState(0)
+  const [filter, setFilter] = useState('all')
   const [confirming, setConfirming] = useState(false)
   const [screenOk, setScreenOk] = useState(null)
   const [online, setOnline] = useState(navigator.onLine)
@@ -76,96 +83,157 @@ export default function ExamScreen({ exam, camera, athena }) {
 
   const { questions, answers, flags, attempt, answerable, pendingLock } = exam
   const question = questions[current]
-  const answeredCount = Object.keys(answers).length
   const locked = attempt?.status === 'locked' || pendingLock
   // A resumed attempt (after a restart) starts outside fullscreen. That is
   // not a policy violation, but answering waits until fullscreen is back.
   const needsFullscreen = !isFullscreen && !locked
   const canEdit = answerable && isFullscreen
-  const lowTime = exam.remaining < 60000
+  const summary = answerSummary(questions, answers, flags)
+  const level = timerLevel(exam.remaining)
+  const visible = filterQuestions(questions, filter, answers, flags)
+  const isLast = current === questions.length - 1
+
+  // Keyboard shortcuts: ← → to move, 1–9 to choose, F to flag.
+  const handlersRef = useRef({})
+  useLayoutEffect(() => {
+    handlersRef.current = {
+      next: () => setCurrent((index) => Math.min(index + 1, questions.length - 1)),
+      previous: () => setCurrent((index) => Math.max(index - 1, 0)),
+      flag: () => canEdit && question && exam.toggleFlag(question.id),
+      choose: (index) => canEdit && question && exam.chooseAnswer(question.id, index),
+    }
+  })
+  useEffect(() => {
+    const onKey = (event) => {
+      if (document.querySelector('dialog[open]')) return
+      const action = keyAction(event, question?.options.length || 0)
+      if (!action) return
+      event.preventDefault()
+      handlersRef.current[action.type](action.index)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [question])
 
   return (
-    <main className="exam-layout">
-      <aside className="exam-sidebar">
-        <div className={`timer ${lowTime ? 'low' : ''}`}><span>Time remaining</span><strong>{formatDuration(exam.remaining)}</strong></div>
-        <div className="sidebar-progress">
-          <div className="progress-label"><span>Answered</span><strong>{answeredCount}/{questions.length}</strong></div>
-          <div className="progress-track"><span style={{ width: `${(answeredCount / questions.length) * 100}%` }} /></div>
+    <div className="exam">
+      <header className="exam-bar">
+        <div className="exam-bar-title">
+          <span className="eyebrow">In progress</span>
+          <strong>{examTitle}</strong>
         </div>
-        <div className="question-grid">
-          {questions.map((item, index) => (
-            <button key={item.id} onClick={() => setCurrent(index)}
-              className={`question-number ${index === current ? 'active' : ''} ${answers[item.id] !== undefined ? 'answered' : ''} ${flags.includes(item.id) ? 'flagged' : ''}`}>
-              {String(index + 1).padStart(2, '0')}
-            </button>
-          ))}
+        <div className={`timer-pill timer-${level}`} role="timer" aria-label={`Time remaining ${formatDuration(exam.remaining)}`}>
+          <Icon name="clock" size={16} />
+          <span>{formatDuration(exam.remaining)}</span>
         </div>
-        <div className="sidebar-footer">
-          <video ref={videoRef} autoPlay playsInline muted className="camera-thumb" />
-          <Indicator ok={camera.status === 'live'} label={camera.status === 'live' ? 'Camera on' : 'Camera interrupted'} />
-          <Indicator ok={athena ? screenOk !== false : false} label={!athena ? 'Screen capture: desktop app only' : screenOk === false ? 'Screen capture blocked' : 'Screen snapshots on'} />
-          <Indicator ok={isFullscreen} label={isFullscreen ? 'Fullscreen' : 'Not fullscreen'} />
-          <Indicator ok={online && exam.saveState !== 'offline'} label={SAVE_TEXT[exam.saveState]} />
-          <Indicator ok={exam.eventState.pending === 0 && exam.eventState.rejected === 0}
-            label={exam.eventState.rejected ? `${exam.eventState.rejected} activity events rejected`
-              : exam.eventState.pending ? `${exam.eventState.pending} activity events waiting to send` : 'Activity log synced'} />
-          {camera.status !== 'live' && <button className="text-button" onClick={camera.start}>Reconnect camera</button>}
+        <div className="exam-bar-progress">
+          <span>{summary.answered} of {summary.total} answered</span>
+          <div className="progress-track" aria-hidden="true"><span style={{ width: `${(summary.answered / Math.max(summary.total, 1)) * 100}%` }} /></div>
         </div>
-      </aside>
+      </header>
+      {level === 'critical' && exam.remaining > 0 && <p className="visually-hidden" role="alert">Less than one minute remaining.</p>}
 
-      <section className="question-area">
-        {needsFullscreen && (
-          <div className="lock-banner" role="alert">
-            <strong>Fullscreen required.</strong> Return to fullscreen to continue answering.
-            <button className="secondary-button" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>Enter fullscreen</button>
-          </div>
-        )}
-        {locked && (
-          <div className="lock-banner" role="alert">
-            <strong>Answers locked.</strong> You left fullscreen.
-            {' '}{isFullscreen ? 'Waiting for your instructor to unlock this attempt.' : 'Return to fullscreen, then ask your instructor to unlock.'}
-            {!isFullscreen && <button className="secondary-button" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>Return to fullscreen</button>}
-          </div>
-        )}
-        <div className="question-topline">
-          <span>Question {current + 1} <small>of {questions.length}</small></span>
-          <button className={`flag-button ${flags.includes(question?.id) ? 'on' : ''}`} disabled={!canEdit} onClick={() => exam.toggleFlag(question.id)}>
-            {flags.includes(question?.id) ? '⚑ Flagged for review' : '⚐ Flag for review'}
-          </button>
-        </div>
-
-        <div className="question-card">
-          <h2>{question?.question}</h2>
-          <div className="option-list">
-            {question?.options.map((option, index) => (
-              <button key={option} disabled={!canEdit} onClick={() => exam.chooseAnswer(question.id, index)}
-                className={`option ${answers[question.id] === index ? 'selected' : ''}`}>
-                <span className="option-key">{String.fromCharCode(65 + index)}</span>
-                <span>{option}</span>
-                <span className="option-check">{answers[question.id] === index ? '✓' : ''}</span>
+      <div className="exam-body">
+        <aside className="navigator" aria-label="Questions">
+          <div className="segmented" role="group" aria-label="Filter questions">
+            {FILTERS.map(([value, label]) => (
+              <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>
+                {label}
+                {value === 'unanswered' && summary.unanswered.length > 0 && <span className="count">{summary.unanswered.length}</span>}
+                {value === 'flagged' && summary.flagged.length > 0 && <span className="count">{summary.flagged.length}</span>}
               </button>
             ))}
           </div>
-        </div>
-
-        <div className="question-actions">
-          <button className="secondary-button" disabled={current === 0} onClick={() => setCurrent(current - 1)}>← Previous</button>
-          {current < questions.length - 1
-            ? <button className="primary-button" onClick={() => setCurrent(current + 1)}>Next <span>→</span></button>
-            : <button className="primary-button" disabled={exam.submitting} onClick={() => setConfirming(true)}>Review and submit <span>↗</span></button>}
-        </div>
-
-        {confirming && (
-          <div className="confirm-box">
-            <p>{answeredCount} of {questions.length} answered{flags.length ? `, ${flags.length} flagged for review` : ''}. You cannot change answers after submitting.</p>
-            <div className="question-actions">
-              <button className="secondary-button" onClick={() => setConfirming(false)}>Keep working</button>
-              <button className="primary-button" disabled={exam.submitting} onClick={exam.submit}>{exam.submitting ? 'Submitting…' : 'Submit exam'}</button>
-            </div>
+          <div className="question-grid">
+            {visible.map(({ question: item, index, answered, flagged }) => (
+              <button key={item.id} type="button" onClick={() => setCurrent(index)}
+                className={`q-chip ${index === current ? 'current' : ''} ${answered ? 'answered' : ''} ${flagged ? 'flagged' : ''}`}
+                aria-current={index === current ? 'true' : undefined}
+                aria-label={`Question ${index + 1}${answered ? ', answered' : ', not answered'}${flagged ? ', flagged' : ''}`}>
+                {index + 1}
+                {flagged && <span className="q-flag" aria-hidden="true" />}
+              </button>
+            ))}
+            {visible.length === 0 && <p className="subtle">No {filter} questions.</p>}
           </div>
-        )}
-        {exam.submitError && <div className="error-message" role="alert">{exam.submitError}</div>}
-      </section>
-    </main>
+          <ul className="legend" aria-hidden="true">
+            <li><span className="q-chip mini answered" />Answered</li>
+            <li><span className="q-chip mini" />Not answered</li>
+            <li><span className="q-chip mini flagged"><span className="q-flag" /></span>Flagged</li>
+          </ul>
+          <p className="shortcut-hint subtle"><kbd>←</kbd> <kbd>→</kbd> move · <kbd>1</kbd>–<kbd>{question?.options.length || 4}</kbd> answer · <kbd>F</kbd> flag</p>
+
+          <div className="monitor-panel">
+            <video ref={videoRef} autoPlay playsInline muted className="camera-thumb" aria-label="Your camera" />
+            <Indicator ok={camera.status === 'live'} label={camera.status === 'live' ? 'Camera on' : 'Camera interrupted'} />
+            <Indicator ok={athena ? screenOk !== false : false} label={!athena ? 'Screen capture: desktop app only' : screenOk === false ? 'Screen capture blocked' : 'Screen snapshots on'} />
+            <Indicator ok={isFullscreen} label={isFullscreen ? 'Fullscreen' : 'Not fullscreen'} />
+            <Indicator ok={online && exam.saveState !== 'offline'} label={SAVE_TEXT[exam.saveState]} />
+            <Indicator ok={exam.eventState.pending === 0 && exam.eventState.rejected === 0}
+              label={exam.eventState.rejected ? `${exam.eventState.rejected} activity events rejected`
+                : exam.eventState.pending ? `${exam.eventState.pending} activity events waiting to send` : 'Activity log synced'} />
+            {camera.status !== 'live' && <Button variant="secondary" size="sm" icon="refresh" onClick={camera.start}>Reconnect camera</Button>}
+          </div>
+        </aside>
+
+        <main className="question-pane">
+          {needsFullscreen && (
+            <Callout tone="warning" role="alert">
+              <strong>Fullscreen required.</strong> Return to fullscreen to continue answering.{' '}
+              <Button size="sm" variant="secondary" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>Enter fullscreen</Button>
+            </Callout>
+          )}
+          {locked && (
+            <Callout tone="danger" role="alert">
+              <strong>Answers locked.</strong> You left fullscreen.{' '}
+              {isFullscreen ? 'Waiting for your instructor to unlock this attempt.' : 'Return to fullscreen, then ask your instructor to unlock.'}
+            </Callout>
+          )}
+
+          <article className="question-card" aria-labelledby="question-text">
+            <div className="question-meta">
+              <span className="eyebrow">Question {current + 1} of {questions.length}</span>
+              <Button variant={flags.includes(question?.id) ? 'secondary' : 'ghost'} size="sm" icon="flag"
+                className={flags.includes(question?.id) ? 'flag-on' : ''} disabled={!canEdit}
+                aria-pressed={flags.includes(question?.id)} onClick={() => exam.toggleFlag(question.id)}>
+                {flags.includes(question?.id) ? 'Flagged for review' : 'Flag for review'}
+              </Button>
+            </div>
+            <h1 id="question-text" className="question-text">{question?.question}</h1>
+            <div className="options" role="radiogroup" aria-labelledby="question-text">
+              {question?.options.map((option, index) => {
+                const selected = answers[question.id] === index
+                return (
+                  <button key={option} type="button" role="radio" aria-checked={selected} disabled={!canEdit}
+                    onClick={() => exam.chooseAnswer(question.id, index)} className={`option ${selected ? 'selected' : ''}`}>
+                    <span className="option-key">{index + 1}</span>
+                    <span className="option-text">{option}</span>
+                    {selected && <Icon name="check" size={16} />}
+                  </button>
+                )
+              })}
+            </div>
+          </article>
+
+          <nav className="question-nav" aria-label="Question navigation">
+            <Button variant="secondary" icon="arrowLeft" disabled={current === 0} onClick={() => setCurrent(current - 1)}>Previous</Button>
+            {isLast
+              ? <Button iconRight="arrowRight" disabled={exam.submitting} onClick={() => setConfirming(true)}>Review and submit</Button>
+              : <Button iconRight="arrowRight" onClick={() => setCurrent(current + 1)}>Next</Button>}
+          </nav>
+
+          {confirming && (
+            <div className="confirm-box">
+              <p>{summary.answered} of {summary.total} answered{summary.flagged.length ? `, ${summary.flagged.length} flagged for review` : ''}. You cannot change answers after submitting.</p>
+              <div className="question-nav">
+                <Button variant="secondary" onClick={() => setConfirming(false)}>Keep working</Button>
+                <Button loading={exam.submitting} onClick={exam.submit}>Submit exam</Button>
+              </div>
+            </div>
+          )}
+          {exam.submitError && <Callout tone="danger" role="alert">{exam.submitError}</Callout>}
+        </main>
+      </div>
+    </div>
   )
 }
