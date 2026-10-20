@@ -7,6 +7,7 @@ import Button from './ui/Button.jsx'
 import Field from './ui/Field.jsx'
 import Modal from './ui/Modal.jsx'
 import { useToast } from './ui/Toast.jsx'
+import PracticalReview from './PracticalReview.jsx'
 
 const SEVERITY_TONE = { critical: 'danger', warning: 'warning', info: 'neutral' }
 
@@ -81,6 +82,8 @@ export default function AttemptDetail({ attempt, instructorKey, serverOffset, no
           </form>
         </div>
       )}
+
+      <PracticalReview attempt={attempt} instructorKey={instructorKey} />
 
       <section className="activity">
         <div className="activity-head">

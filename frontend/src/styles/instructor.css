@@ -60,3 +60,7 @@
 .activity-list li.sev-warning { border-left-color: var(--warning); }
 .activity-list time { color: var(--text-subtle); font-size: var(--text-xs); padding-top: 2px; }
 .evidence-ref { font-family: var(--font-mono); font-size: 11px; color: var(--text-subtle); margin-top: 2px; }
+.detail .file-list li { grid-template-columns: 1fr auto auto auto auto; }
+.test-row { display: grid !important; grid-template-columns: 1fr auto auto; align-items: center; gap: var(--space-3); }
+.test-row > div:first-child { display: flex; flex-direction: column; }
+.test-row .segmented button { padding: 4px 10px; }
