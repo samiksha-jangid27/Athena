@@ -7,6 +7,7 @@ import InstructorDashboard from './components/InstructorDashboard.jsx'
 import RecoveryScreen from './components/RecoveryScreen.jsx'
 import { useCamera } from './hooks/useCamera.js'
 import { useExamAttempt } from './hooks/useExamAttempt.js'
+import { useTheme } from './hooks/useTheme.js'
 
 const athena = typeof window !== 'undefined' ? window.athena : undefined
 
@@ -49,12 +50,14 @@ function App() {
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
   const instructor = route === '#/instructor'
+  const { theme, cycle } = useTheme()
 
   return (
     <div className="app-shell">
       <header className="topbar">
         <div className="brand"><span className="brand-mark">A</span><span>Athena</span></div>
         <div className="secure-label"><span className="status-dot" /> {instructor ? 'Instructor view' : 'Monitored exam session'}</div>
+        <button className="rules-link" onClick={cycle} aria-label={`Theme: ${theme}. Change theme`}>Theme: {theme}</button>
         <a className="rules-link" href={instructor ? '#/' : '#/instructor'}>{instructor ? 'Student view' : 'Instructor'}</a>
       </header>
       {instructor ? <InstructorDashboard /> : <StudentApp />}

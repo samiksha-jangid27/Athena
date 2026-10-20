@@ -1,0 +1,32 @@
+*, *::before, *::after { box-sizing: border-box; }
+html, body, #root { min-height: 100%; margin: 0; }
+body {
+  min-width: 360px;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 var(--text-md)/1.5 var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
+.display { font-family: var(--font-serif); font-weight: 500; letter-spacing: -.02em; }
+p { margin: 0; }
+a { color: var(--accent); }
+button, input, textarea, select { font: inherit; color: inherit; }
+code, pre, kbd { font-family: var(--font-mono); font-size: .92em; }
+kbd { border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; background: var(--surface); }
+
+/* One consistent, clearly visible focus ring for keyboard users. */
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.muted { color: var(--text-muted); }
+.subtle { color: var(--text-subtle); font-size: var(--text-sm); }
+.eyebrow { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.stack { display: flex; flex-direction: column; gap: var(--space-4); }
+.row { display: flex; align-items: center; gap: var(--space-3); }
+.spacer { flex: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+}

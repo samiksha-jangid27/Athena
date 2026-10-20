@@ -1,0 +1,74 @@
+/* Athena design tokens. Olive and laurel for wisdom, bronze for attention.
+   Light is the default; dark follows the OS unless the user picks a theme. */
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --space-1: 4px; --space-2: 8px; --space-3: 12px; --space-4: 16px;
+  --space-5: 24px; --space-6: 32px; --space-7: 48px; --space-8: 64px;
+  --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px; --radius-pill: 999px;
+  --text-xs: 12px; --text-sm: 13px; --text-md: 15px; --text-lg: 18px; --text-xl: 24px; --text-2xl: 34px; --text-3xl: 48px;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+  --dur: 160ms;
+
+  --bg: #f5f4ee;
+  --bg-elevated: #fbfaf6;
+  --surface: #ffffff;
+  --surface-muted: #f0efe7;
+  --border: #e2e0d4;
+  --border-strong: #cdcab9;
+  --text: #1c211b;
+  --text-muted: #5f665b;
+  --text-subtle: #7d8478;
+  --accent: #3f6b45;
+  --accent-hover: #335a39;
+  --accent-soft: #e6efe2;
+  --accent-text: #ffffff;
+  --gold: #a87516;
+  --gold-soft: #f7ecd4;
+  --danger: #b2412b;
+  --danger-soft: #fbe7e1;
+  --warning: #9a6b06;
+  --warning-soft: #fbf1d6;
+  --success: #2f7a45;
+  --success-soft: #e2f2e5;
+  --info: #3b5f8a;
+  --info-soft: #e5edf7;
+  --focus: #3b78d8;
+  --shadow-sm: 0 1px 2px rgba(28, 33, 27, .06);
+  --shadow-md: 0 8px 24px rgba(28, 33, 27, .08);
+  --shadow-lg: 0 24px 60px rgba(28, 33, 27, .16);
+  --backdrop: rgba(20, 24, 19, .45);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #121511; --bg-elevated: #171b16; --surface: #1c211b; --surface-muted: #232922;
+    --border: #2e352d; --border-strong: #3d463c;
+    --text: #ecefe8; --text-muted: #a7afa2; --text-subtle: #868e82;
+    --accent: #8cc08f; --accent-hover: #a2d0a4; --accent-soft: #24331f; --accent-text: #10170f;
+    --gold: #e0b45c; --gold-soft: #3a2f17;
+    --danger: #f08a73; --danger-soft: #3d201a; --warning: #e6c05e; --warning-soft: #362d14;
+    --success: #7fcf8f; --success-soft: #1c3322; --info: #8fb3e3; --info-soft: #1d2a3b;
+    --focus: #7fb0ff;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-md: 0 8px 24px rgba(0, 0, 0, .35); --shadow-lg: 0 24px 60px rgba(0, 0, 0, .5);
+    --backdrop: rgba(0, 0, 0, .6);
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #121511; --bg-elevated: #171b16; --surface: #1c211b; --surface-muted: #232922;
+  --border: #2e352d; --border-strong: #3d463c;
+  --text: #ecefe8; --text-muted: #a7afa2; --text-subtle: #868e82;
+  --accent: #8cc08f; --accent-hover: #a2d0a4; --accent-soft: #24331f; --accent-text: #10170f;
+  --gold: #e0b45c; --gold-soft: #3a2f17;
+  --danger: #f08a73; --danger-soft: #3d201a; --warning: #e6c05e; --warning-soft: #362d14;
+  --success: #7fcf8f; --success-soft: #1c3322; --info: #8fb3e3; --info-soft: #1d2a3b;
+  --focus: #7fb0ff;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-md: 0 8px 24px rgba(0, 0, 0, .35); --shadow-lg: 0 24px 60px rgba(0, 0, 0, .5);
+  --backdrop: rgba(0, 0, 0, .6);
+  color-scheme: dark;
+}
