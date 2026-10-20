@@ -1,0 +1,137 @@
+// End-to-end tests of the HTTP API against a temporary data directory.
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+const { createApp } = require("../app");
+
+const KEY = "test-instructor-key";
+let server;
+let baseUrl;
+let sessionsPath;
+
+test.before(async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "athena-api-"));
+  sessionsPath = path.join(dir, "sessions.json");
+  const app = createApp({
+    instructorKey: KEY,
+    questionsPath: path.join(__dirname, "..", "data", "questions.json"),
+    sessionsPath,
+  });
+  server = app.listen(0);
+  await new Promise((resolve) => server.once("listening", resolve));
+  baseUrl = `http://127.0.0.1:${server.address().port}`;
+});
+
+test.after(() => server.close());
+
+async function call(method, url, { body, token, key, raw } = {}) {
+  const headers = { "content-type": "application/json" };
+  if (token) headers.authorization = `Bearer ${token}`;
+  if (key) headers["x-instructor-key"] = key;
+  const response = await fetch(baseUrl + url, {
+    method,
+    headers,
+    body: raw ?? (body === undefined ? undefined : JSON.stringify(body)),
+  });
+  return { status: response.status, body: await response.json() };
+}
+
+async function startAttempt() {
+  const { body } = await call("POST", "/exam/start", { body: { userId: "s1", name: "Sam" } });
+  return body;
+}
+
+function editStoredAttempt(sessionId, change) {
+  const sessions = JSON.parse(fs.readFileSync(sessionsPath, "utf-8"));
+  change(sessions.find((item) => item.sessionId === sessionId));
+  fs.writeFileSync(sessionsPath, JSON.stringify(sessions));
+}
+
+test("start validates input and never returns correct answers", async () => {
+  assert.equal((await call("POST", "/exam/start", { body: { userId: " ", name: "x" } })).status, 400);
+  assert.equal((await call("POST", "/exam/start", { body: { userId: 5, name: "x" } })).status, 400);
+  const started = await startAttempt();
+  assert.equal(started.attempt.status, "in-progress");
+  assert.ok(started.questions.length > 0);
+  assert.ok(started.questions.every((question) => !("correctAnswer" in question)));
+  const stored = fs.readFileSync(sessionsPath, "utf-8");
+  assert.ok(!stored.includes(started.token), "raw token must not be stored");
+});
+
+test("student endpoints require a valid token", async () => {
+  assert.equal((await call("GET", "/exam/attempt")).status, 401);
+  assert.equal((await call("GET", "/exam/attempt", { token: "nope" })).status, 401);
+  assert.equal((await call("PUT", "/exam/answers", { token: "nope", body: { answers: {} } })).status, 401);
+});
+
+test("malformed JSON and unknown routes return JSON errors", async () => {
+  const bad = await call("POST", "/exam/start", { raw: "{oops" });
+  assert.equal(bad.status, 400);
+  assert.match(bad.body.message, /valid JSON/);
+  assert.equal((await call("GET", "/missing")).status, 404);
+});
+
+test("locked attempts reject answers until an instructor unlocks", async () => {
+  const { token, attempt } = await startAttempt();
+  await call("POST", "/exam/events", { token, body: { events: [{ type: "fullscreen-exit", at: new Date().toISOString() }] } });
+  const rejected = await call("PUT", "/exam/answers", { token, body: { answers: { 1: 1 } } });
+  assert.equal(rejected.status, 409);
+  assert.equal(rejected.body.attempt.status, "locked");
+
+  assert.equal((await call("POST", `/instructor/attempts/${attempt.sessionId}/unlock`)).status, 401);
+  assert.equal((await call("POST", `/instructor/attempts/${attempt.sessionId}/unlock`, { key: "wrong" })).status, 401);
+  assert.equal((await call("POST", `/instructor/attempts/${attempt.sessionId}/unlock`, { key: KEY })).status, 200);
+  assert.equal((await call("PUT", "/exam/answers", { token, body: { answers: { 1: 1 } } })).status, 200);
+});
+
+test("unlocking an attempt that is not locked is a conflict", async () => {
+  const { attempt } = await startAttempt();
+  assert.equal((await call("POST", `/instructor/attempts/${attempt.sessionId}/unlock`, { key: KEY })).status, 409);
+  assert.equal((await call("POST", "/instructor/attempts/missing/unlock", { key: KEY })).status, 404);
+});
+
+test("extensions are validated and require the instructor key", async () => {
+  const { token, attempt } = await startAttempt();
+  const url = `/instructor/attempts/${attempt.sessionId}/extend`;
+  assert.equal((await call("POST", url, { body: { minutes: 5 } })).status, 401);
+  assert.equal((await call("POST", url, { key: KEY, body: { minutes: "lots" } })).status, 409);
+  assert.equal((await call("POST", url, { key: KEY, body: { minutes: 500 } })).status, 409);
+  const ok = await call("POST", url, { key: KEY, body: { minutes: 5 } });
+  assert.equal(Date.parse(ok.body.deadline), Date.parse(attempt.deadline) + 5 * 60000);
+  const { body } = await call("GET", "/exam/attempt", { token });
+  assert.equal(body.attempt.deadline, ok.body.deadline);
+});
+
+test("expired attempts reject answers but keep saved ones", async () => {
+  const { token, attempt } = await startAttempt();
+  await call("PUT", "/exam/answers", { token, body: { answers: { 1: 1 } } });
+  editStoredAttempt(attempt.sessionId, (stored) => {
+    stored.deadline = new Date(Date.now() - 60000).toISOString();
+  });
+  const late = await call("PUT", "/exam/answers", { token, body: { answers: { 1: 0 } } });
+  assert.equal(late.status, 409);
+  assert.equal(late.body.attempt.status, "expired");
+  assert.deepEqual(late.body.attempt.answers, { 1: 1 });
+});
+
+test("duplicate submissions do not change the result", async () => {
+  const { token } = await startAttempt();
+  const first = await call("POST", "/exam/submit", { token, body: { answers: { 1: 1 } } });
+  const second = await call("POST", "/exam/submit", { token, body: { answers: { 1: 0, 2: 0 } } });
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.deepEqual(second.body.result, first.body.result);
+  assert.equal(second.body.attempt.submittedAt, first.body.attempt.submittedAt);
+  assert.equal((await call("PUT", "/exam/answers", { token, body: { answers: { 1: 0 } } })).status, 409);
+});
+
+test("invalid events are rejected and nothing is recorded", async () => {
+  const { token, attempt } = await startAttempt();
+  const bad = await call("POST", "/exam/events", { token, body: { events: [{ type: "window-blur" }, { type: "keystrokes" }] } });
+  assert.equal(bad.status, 400);
+  assert.equal((await call("POST", "/exam/events", { token, body: { events: "nope" } })).status, 400);
+  const { body } = await call("GET", "/instructor/attempts", { key: KEY });
+  assert.equal(body.find((item) => item.sessionId === attempt.sessionId).eventCount, 0);
+});
