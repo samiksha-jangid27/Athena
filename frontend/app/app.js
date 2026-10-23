@@ -5,8 +5,8 @@ import fs from "node:fs";
 import http from "node:http";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
-import { isTrustedUrl, toSnapshotBytes } from "./ipc-validation.js";
-import { findDisallowed, listProcessNames } from "./background-apps.js";
+import { isTrustedUrl, toSnapshotBytes, isProhibitedShortcut } from "./ipc-validation.js";
+import { scanBackgroundApps } from "./background-apps.js";
 
 const DEV_URL = "http://localhost:5173";
 const BACKEND_URL = "http://127.0.0.1:3000/";
@@ -176,14 +176,9 @@ handle("proctoring:start", () => {
 
 handle("proctoring:check-screen", () => checkScreenCapture());
 
-// Returns only the names of disallowed apps that are running.
+// Returns disallowed apps or scan errors honestly.
 handle("proctoring:check-apps", async () => {
-  try {
-    return { supported: true, found: findDisallowed(await listProcessNames()) };
-  } catch (error) {
-    console.error("Background app check failed:", error);
-    return { supported: false, found: [] };
-  }
+  return scanBackgroundApps();
 });
 
 handle("proctoring:stop", () => {
@@ -219,18 +214,14 @@ function createWindow() {
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
 
-  // Best-effort shortcut blocking inside this window only. OS-level shortcuts
-  // (Cmd+Tab, Alt+Tab, Mission Control, etc.) cannot be blocked by Electron;
-  // the renderer detects leaving via blur/fullscreen events instead.
-  if (app.isPackaged) {
-    mainWindow.webContents.on("before-input-event", (event, input) => {
-      const mod = input.control || input.meta;
-      const key = input.key.toLowerCase();
-      if ((mod && key === "r") || key === "f5" || key === "f12" || (mod && input.shift && key === "i")) {
-        event.preventDefault();
-      }
-    });
-  }
+  // Intercept prohibited in-app shortcuts (reload, DevTools, source, new windows).
+  // OS-level shortcuts (Cmd+Tab, Alt+Tab, Mission Control) cannot be intercepted
+  // by Electron; Athena monitors focus and fullscreen transitions instead.
+  mainWindow.webContents.on("before-input-event", (event, input) => {
+    if (isProhibitedShortcut(input, { isPackaged: app.isPackaged })) {
+      event.preventDefault();
+    }
+  });
 
   mainWindow.on("closed", () => {
     stopProctoring();

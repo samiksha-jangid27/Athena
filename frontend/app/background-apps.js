@@ -15,6 +15,9 @@ export const DISALLOWED_APPS = [
   { name: "AnyDesk", match: ["anydesk"] },
   { name: "OBS Studio", match: ["obs", "obs64"] },
   { name: "ChatGPT", match: ["chatgpt"] },
+  { name: "Claude", match: ["claude"] },
+  { name: "Skype", match: ["skype"] },
+  { name: "Cisco Webex", match: ["webex", "ciscowebexstart"] },
 ];
 
 // Pure matcher so it can be unit tested. Exact (case-insensitive) match on
@@ -33,11 +36,37 @@ export function parseProcessList(output, platform) {
 }
 
 export function listProcessNames(platform = process.platform) {
-  const [command, args] = platform === "win32" ? ["tasklist", ["/fo", "csv", "/nh"]] : ["ps", ["-axco", "comm="]];
+  if (platform !== "darwin" && platform !== "win32" && platform !== "linux") {
+    return Promise.reject(new Error(`Platform ${platform} does not support process scanning`));
+  }
+  const [command, args] = platform === "win32"
+    ? ["tasklist", ["/fo", "csv", "/nh"]]
+    : platform === "linux"
+      ? ["ps", ["-axo", "comm="]]
+      : ["ps", ["-axco", "comm="]];
   return new Promise((resolve, reject) => {
     execFile(command, args, { timeout: 5000, maxBuffer: 2 * 1024 * 1024 }, (error, stdout) => {
       if (error) reject(error);
       else resolve(parseProcessList(stdout, platform));
     });
   });
+}
+
+// Structured scanner that distinguishes clean, found, unsupported, and scanner error.
+// Never displays "none found" when an error or permission denial occurred.
+export async function scanBackgroundApps(platform = process.platform) {
+  if (platform !== "darwin" && platform !== "win32" && platform !== "linux") {
+    return { supported: false, found: [], error: `Process scan is not supported on ${platform}.` };
+  }
+  try {
+    const processNames = await listProcessNames(platform);
+    const found = findDisallowed(processNames);
+    return { supported: true, found, error: null };
+  } catch (error) {
+    return {
+      supported: true,
+      found: [],
+      error: `Process scan failed (${error.code || error.message || "permission denied"}).`,
+    };
+  }
 }

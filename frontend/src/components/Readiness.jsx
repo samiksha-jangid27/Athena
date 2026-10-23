@@ -99,17 +99,25 @@ export default function Readiness({ camera, onBegin, athena }) {
   }
 
   async function checkApps() {
-    setApps({ state: 'checking', found: [] })
+    setApps({ state: 'checking', found: [], error: null })
     try {
       const result = await athena.checkBackgroundApps()
-      setApps({ state: result.supported ? (result.found.length ? 'found' : 'clear') : 'unsupported', found: result.found })
-    } catch {
-      setApps({ state: 'unsupported', found: [] })
+      if (result.error) {
+        setApps({ state: 'error', found: [], error: result.error })
+      } else if (!result.supported) {
+        setApps({ state: 'unsupported', found: [], error: null })
+      } else if (result.found && result.found.length > 0) {
+        setApps({ state: 'found', found: result.found, error: null })
+      } else {
+        setApps({ state: 'clear', found: [], error: null })
+      }
+    } catch (err) {
+      setApps({ state: 'error', found: [], error: err.message || 'Scan error' })
     }
   }
 
   const screenReady = screen.state === 'ok' || screen.state === 'unsupported'
-  const checksReady = online && camera.status === 'live' && screenReady
+  const checksReady = Boolean(online && camera.status === 'live' && screenReady && apps.state !== 'found' && apps.state !== 'checking')
 
   async function start() {
     setStarting(true)
@@ -216,18 +224,20 @@ export default function Readiness({ camera, onBegin, athena }) {
                     : 'Athena saves a screenshot about every 30 seconds during the exam.'}
               </CheckRow>
               <CheckRow icon="monitor" title="Other apps"
-                tone={apps.state === 'clear' ? 'success' : apps.state === 'found' || apps.state === 'unsupported' ? 'warning' : 'neutral'}
-                status={{ idle: 'Not checked', checking: 'Checking', clear: 'None found', found: `${apps.found.length} open`, unsupported: 'Not available' }[apps.state]}
+                tone={apps.state === 'clear' ? 'success' : apps.state === 'found' || apps.state === 'error' ? 'danger' : apps.state === 'unsupported' ? 'warning' : 'neutral'}
+                status={{ idle: 'Not checked', checking: 'Scanning…', clear: 'None found', found: `${apps.found.length} prohibited`, error: 'Scan error', unsupported: 'Not available' }[apps.state]}
                 action={athena && apps.state !== 'clear' && (
                   <Button variant="secondary" size="sm" loading={apps.state === 'checking'} onClick={checkApps}>
-                    {apps.state === 'idle' ? 'Check apps' : 'Check again'}
+                    {apps.state === 'idle' ? 'Check apps' : apps.state === 'found' ? 'Close & Rescan' : 'Check again'}
                   </Button>
                 )}>
                 {apps.state === 'found'
-                  ? `Close ${apps.found.join(', ')} before starting. Running them during the exam may breach exam rules.`
-                  : apps.state === 'unsupported'
-                    ? 'Athena cannot check other apps here. Close messaging, meeting, remote-desktop and AI apps yourself.'
-                    : 'Athena checks for common meeting, messaging, remote-desktop and AI apps. It only reads app names.'}
+                  ? `Disallowed applications detected: ${apps.found.join(', ')}. You must close them before you can proceed.`
+                  : apps.state === 'error'
+                    ? `${apps.error || 'Scan failed.'} Please verify manually that messaging, meeting, and screen-sharing apps are closed.`
+                    : apps.state === 'unsupported'
+                      ? 'Athena cannot check other apps on this platform. Please close messaging, meeting, remote-desktop and AI apps manually.'
+                      : 'Athena checks for common meeting, messaging, remote-desktop and AI apps. It inspects process names only.'}
               </CheckRow>
             </div>
             <div className={`camera-frame ${camera.status === 'live' ? 'live' : ''}`}>

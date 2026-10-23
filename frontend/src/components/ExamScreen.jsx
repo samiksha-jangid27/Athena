@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { formatDuration, syncLabel } from '../lib/exam.js'
 import { answerSummary, filterQuestions, keyAction, timerLevel } from '../lib/navigation.js'
 import Button from './ui/Button.jsx'
@@ -25,9 +25,27 @@ export default function ExamScreen({ exam, camera, athena }) {
   const [screenOk, setScreenOk] = useState(null)
   const [online, setOnline] = useState(navigator.onLine)
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement))
+  const [activeDisallowed, setActiveDisallowed] = useState([])
   const videoRef = useRef(null)
   const { logEvent } = exam
   const snapshot = camera.snapshot
+
+  const checkRunningApps = useCallback(async () => {
+    if (!athena?.checkBackgroundApps) return
+    try {
+      const result = await athena.checkBackgroundApps()
+      if (result?.supported && result.found) {
+        if (result.found.length > 0) {
+          logEvent('disallowed-app-detected', `Detected running: ${result.found.join(', ')}`)
+          setActiveDisallowed(result.found)
+        } else {
+          setActiveDisallowed([])
+        }
+      }
+    } catch {
+      // Best-effort background scan
+    }
+  }, [athena, logEvent])
 
   useEffect(() => {
     if (videoRef.current) videoRef.current.srcObject = camera.stream
@@ -41,8 +59,14 @@ export default function ExamScreen({ exam, camera, athena }) {
       setIsFullscreen(active)
       logEvent(active ? 'fullscreen-enter' : 'fullscreen-exit')
     }
-    const onBlur = () => logEvent('window-blur')
-    const onFocus = () => logEvent('window-focus')
+    const onBlur = () => {
+      logEvent('window-blur')
+      checkRunningApps()
+    }
+    const onFocus = () => {
+      logEvent('window-focus')
+      checkRunningApps()
+    }
     const onOnline = () => { setOnline(true); logEvent('network-online') }
     const onOffline = () => { setOnline(false); logEvent('network-offline') }
     document.addEventListener('fullscreenchange', onFullscreen)
@@ -57,7 +81,7 @@ export default function ExamScreen({ exam, camera, athena }) {
       window.removeEventListener('online', onOnline)
       window.removeEventListener('offline', onOffline)
     }
-  }, [logEvent])
+  }, [logEvent, checkRunningApps])
 
   // Camera interruptions.
   const previousCamera = useRef(camera.status)
@@ -67,7 +91,7 @@ export default function ExamScreen({ exam, camera, athena }) {
     previousCamera.current = camera.status
   }, [camera.status, logEvent])
 
-  // Desktop-only evidence capture, with a visible indicator.
+  // Desktop-only evidence capture and active background application monitoring.
   useEffect(() => {
     if (!athena) return undefined
     const offScreen = athena.onScreenCaptureStatus((ok) => {
@@ -77,6 +101,7 @@ export default function ExamScreen({ exam, camera, athena }) {
     const offCamera = athena.onCameraSnapshotRequest(async () => {
       const bytes = await snapshot().catch(() => null)
       if (bytes) athena.saveCameraSnapshot(bytes).catch(() => {})
+      checkRunningApps()
     })
     athena.startProctoring()
     return () => {
@@ -84,7 +109,7 @@ export default function ExamScreen({ exam, camera, athena }) {
       offCamera()
       athena.stopProctoring()
     }
-  }, [athena, logEvent, snapshot])
+  }, [athena, logEvent, snapshot, checkRunningApps])
 
   const { questions, answers, flags, attempt, answerable, pendingLock } = exam
   const question = questions[current]
@@ -201,6 +226,15 @@ export default function ExamScreen({ exam, camera, athena }) {
             <Callout tone="warning" role="alert">
               <strong>Fullscreen required.</strong> Return to fullscreen to continue answering.{' '}
               <Button size="sm" variant="secondary" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>Enter fullscreen</Button>
+            </Callout>
+          )}
+          {activeDisallowed.length > 0 && (
+            <Callout tone="danger" role="alert">
+              <div className="row">
+                <strong>Disallowed application detected:</strong> {activeDisallowed.join(', ')}.
+                <Button size="sm" variant="secondary" onClick={checkRunningApps}>Close & Rescan</Button>
+              </div>
+              <p className="subtle">Running prohibited applications during an examination violates integrity policies and has been recorded on your activity timeline.</p>
             </Callout>
           )}
           {!locked && view === 'practical' && practicalTask ? <PracticalTask task={practicalTask} practical={practical} canEdit={canEdit} /> : locked ? <LockedPanel confirmed={attempt?.status === 'locked'} isFullscreen={isFullscreen} lockedAt={exam.lockedAt} /> : (
