@@ -47,5 +47,7 @@ test('evidenceHint points to the right local evidence folder', async () => {
   const { evidenceHint } = await import('./instructor.js')
   assert.match(evidenceHint({ type: 'camera-lost' }), /camera/)
   assert.match(evidenceHint({ type: 'fullscreen-exit' }), /screen/)
+  assert.match(evidenceHint({ type: 'camera-lost' }, 'session-123'), /evidence\/session-123\/camera/)
+  assert.match(evidenceHint({ type: 'disallowed-app-detected' }, 'session-123'), /evidence\/session-123\/screen/)
   assert.equal(evidenceHint({ type: 'submitted' }), null)
 })

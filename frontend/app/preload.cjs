@@ -10,11 +10,12 @@ function subscribe(channel, callback) {
 
 contextBridge.exposeInMainWorld("athena", {
   isDesktop: true,
-  startProctoring: () => ipcRenderer.invoke("proctoring:start"),
+  startProctoring: (sessionId) => ipcRenderer.invoke("proctoring:start", sessionId),
   stopProctoring: () => ipcRenderer.invoke("proctoring:stop"),
   checkScreenCapture: () => ipcRenderer.invoke("proctoring:check-screen"),
   checkBackgroundApps: () => ipcRenderer.invoke("proctoring:check-apps"),
-  saveCameraSnapshot: (bytes) => ipcRenderer.invoke("proctoring:save-camera-snap", bytes),
+  saveCameraSnapshot: (bytes, sessionId) => ipcRenderer.invoke("proctoring:save-camera-snap", bytes, sessionId),
+  openEvidenceFolder: (sessionId) => ipcRenderer.invoke("proctoring:open-evidence", sessionId),
   onCameraSnapshotRequest: (callback) => subscribe("proctoring:camera-snap-request", callback),
   onScreenCaptureStatus: (callback) => subscribe("proctoring:screen-status", callback),
 });

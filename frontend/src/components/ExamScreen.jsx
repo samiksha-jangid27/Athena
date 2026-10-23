@@ -92,6 +92,7 @@ export default function ExamScreen({ exam, camera, athena }) {
   }, [camera.status, logEvent])
 
   // Desktop-only evidence capture and active background application monitoring.
+  const sessionId = exam.attempt?.sessionId
   useEffect(() => {
     if (!athena) return undefined
     const offScreen = athena.onScreenCaptureStatus((ok) => {
@@ -100,16 +101,16 @@ export default function ExamScreen({ exam, camera, athena }) {
     })
     const offCamera = athena.onCameraSnapshotRequest(async () => {
       const bytes = await snapshot().catch(() => null)
-      if (bytes) athena.saveCameraSnapshot(bytes).catch(() => {})
+      if (bytes) athena.saveCameraSnapshot(bytes, sessionId).catch(() => {})
       checkRunningApps()
     })
-    athena.startProctoring()
+    athena.startProctoring(sessionId)
     return () => {
       offScreen()
       offCamera()
       athena.stopProctoring()
     }
-  }, [athena, logEvent, snapshot, checkRunningApps])
+  }, [athena, sessionId, logEvent, snapshot, checkRunningApps])
 
   const { questions, answers, flags, attempt, answerable, pendingLock } = exam
   const question = questions[current]
@@ -222,6 +223,15 @@ export default function ExamScreen({ exam, camera, athena }) {
         </aside>
 
         <main className="question-pane">
+          {exam.extensionNotice && (
+            <Callout tone="success" role="status">
+              <div className="row">
+                <Icon name="clock" size={16} />
+                <span>{exam.extensionNotice}</span>
+                <Button size="sm" variant="ghost" icon="x" onClick={exam.clearExtensionNotice} aria-label="Dismiss extension notice" />
+              </div>
+            </Callout>
+          )}
           {needsFullscreen && (
             <Callout tone="warning" role="alert">
               <strong>Fullscreen required.</strong> Return to fullscreen to continue answering.{' '}

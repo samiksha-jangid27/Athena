@@ -1,8 +1,9 @@
 // Electron main process for Athena.
-import { app, BrowserWindow, ipcMain, desktopCapturer, session, systemPreferences } from "electron";
+import { app, BrowserWindow, ipcMain, desktopCapturer, session, systemPreferences, shell } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import http from "node:http";
+import crypto from "node:crypto";
 import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { isTrustedUrl, toSnapshotBytes, isProhibitedShortcut } from "./ipc-validation.js";
@@ -92,8 +93,18 @@ function startBackend() {
 
 // ---------------- Evidence capture ----------------
 
-function evidenceDir(kind) {
-  const directory = path.join(app.getPath("userData"), "evidence", kind);
+let currentSessionId = null;
+
+function sanitizeSessionId(id) {
+  if (typeof id === "string" && /^session-[\w-]+$/.test(id)) {
+    return id.slice(0, 64);
+  }
+  return "general";
+}
+
+function evidenceDir(kind, sessionId = currentSessionId) {
+  const sessionSubdir = sanitizeSessionId(sessionId);
+  const directory = path.join(app.getPath("userData"), "evidence", sessionSubdir, kind);
   fs.mkdirSync(directory, { recursive: true });
   return directory;
 }
@@ -112,7 +123,8 @@ async function captureScreen() {
     const thumbnail = sources[0]?.thumbnail;
     // macOS returns an empty image when Screen Recording permission is missing.
     if (thumbnail && !thumbnail.isEmpty()) {
-      fs.writeFileSync(path.join(evidenceDir("screen"), `${Date.now()}.jpg`), thumbnail.toJPEG(70));
+      const filename = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.jpg`;
+      fs.writeFileSync(path.join(evidenceDir("screen"), filename), thumbnail.toJPEG(70));
       ok = true;
     }
   } catch (error) {
@@ -169,9 +181,10 @@ function handle(channel, handler) {
   });
 }
 
-handle("proctoring:start", () => {
+handle("proctoring:start", (sessionId) => {
+  currentSessionId = sanitizeSessionId(sessionId);
   startProctoring();
-  return { intervalMs: SNAPSHOT_INTERVAL_MS };
+  return { intervalMs: SNAPSHOT_INTERVAL_MS, sessionId: currentSessionId };
 });
 
 handle("proctoring:check-screen", () => checkScreenCapture());
@@ -186,12 +199,23 @@ handle("proctoring:stop", () => {
   return true;
 });
 
-handle("proctoring:save-camera-snap", (bytes) => {
+handle("proctoring:save-camera-snap", (bytes, sessionId) => {
   const valid = toSnapshotBytes(bytes);
   if (!valid) throw new Error("Invalid camera snapshot");
   const data = Buffer.from(valid.buffer, valid.byteOffset, valid.byteLength);
-  fs.writeFileSync(path.join(evidenceDir("camera"), `${Date.now()}.jpg`), data);
+  const targetDir = evidenceDir("camera", sessionId || currentSessionId);
+  const filename = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.jpg`;
+  fs.writeFileSync(path.join(targetDir, filename), data);
   return true;
+});
+
+handle("proctoring:open-evidence", async (sessionId) => {
+  const targetDir = sessionId
+    ? path.join(app.getPath("userData"), "evidence", sanitizeSessionId(sessionId))
+    : path.join(app.getPath("userData"), "evidence");
+  fs.mkdirSync(targetDir, { recursive: true });
+  const openError = await shell.openPath(targetDir);
+  return { success: !openError, path: targetDir, error: openError || null };
 });
 
 // ---------------- Window ----------------

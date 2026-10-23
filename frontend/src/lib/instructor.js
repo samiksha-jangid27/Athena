@@ -69,10 +69,11 @@ export const EVENT_LABEL = {
 
 // Where to find evidence for an event. Evidence stays on the student's
 // device, so this is a reference, not a link.
-export function evidenceHint(event) {
-  if (event.type === 'camera-lost' || event.type === 'camera-restored') return 'Camera photos: <userData>/evidence/camera'
+export function evidenceHint(event, sessionId) {
+  const prefix = sessionId ? `<userData>/evidence/${sessionId}` : '<userData>/evidence'
+  if (event.type === 'camera-lost' || event.type === 'camera-restored') return `Camera photos: ${prefix}/camera`
   if (event.type.startsWith('screen-capture') || event.type === 'window-blur' || event.type === 'fullscreen-exit' || event.type === 'disallowed-app-detected') {
-    return 'Screenshots: <userData>/evidence/screen'
+    return `Screenshots: ${prefix}/screen`
   }
   return null
 }

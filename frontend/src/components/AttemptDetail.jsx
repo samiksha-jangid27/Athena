@@ -80,6 +80,18 @@ export default function AttemptDetail({ attempt, instructorKey, serverOffset, no
               onChange={(event) => setMinutes(event.target.value)} error={minutes === '' ? undefined : extensionError || undefined} />
             <Button type="submit" variant="secondary" icon="clock" disabled={Boolean(extensionError)}>Extend time</Button>
           </form>
+          {typeof window !== 'undefined' && window.athena?.openEvidenceFolder && (
+            <Button variant="ghost" size="sm" icon="file" onClick={async () => {
+              try {
+                const res = await window.athena.openEvidenceFolder(attempt.sessionId)
+                if (res?.error) notify(res.error, 'error')
+              } catch {
+                notify('Could not open evidence folder.', 'error')
+              }
+            }}>
+              Open local evidence folder
+            </Button>
+          )}
         </div>
       )}
 
@@ -99,7 +111,7 @@ export default function AttemptDetail({ attempt, instructorKey, serverOffset, no
         {events.length === 0 ? <p className="subtle">No {severity === 'all' ? '' : severity} events recorded.</p> : (
           <ol className="activity-list">
             {events.map((event) => {
-              const hint = evidenceHint(event)
+              const hint = evidenceHint(event, attempt.sessionId)
               return (
                 <li key={event.id || event.seq} className={`sev-${event.severity || 'info'}`}>
                   <time className="num" title={`Received ${time(event.receivedAt)}`}>{time(event.clientAt || event.receivedAt)}</time>

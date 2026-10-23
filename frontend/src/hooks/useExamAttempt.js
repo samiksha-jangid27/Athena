@@ -30,9 +30,11 @@ export function useExamAttempt() {
   const [now, setNow] = useState(() => Date.now())
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [extensionNotice, setExtensionNotice] = useState(null)
 
   const dirtyRef = useRef(false)
   const eventsRef = useRef([])
+  const prevDeadlineRef = useRef(null)
   const submittingRef = useRef(false)
   const stateRef = useRef({})
   // Latest values for async callbacks (timers, retries).
@@ -58,6 +60,15 @@ export function useExamAttempt() {
 
   const applyServer = useCallback((serverAttempt) => {
     if (!serverAttempt) return
+    if (prevDeadlineRef.current && serverAttempt.deadline) {
+      const prev = Date.parse(prevDeadlineRef.current)
+      const current = Date.parse(serverAttempt.deadline)
+      if (current > prev) {
+        const addedMin = Math.round((current - prev) / 60000)
+        setExtensionNotice(`Time extended: +${addedMin} minute${addedMin === 1 ? '' : 's'} added to your exam.`)
+      }
+    }
+    prevDeadlineRef.current = serverAttempt.deadline
     setAttempt(serverAttempt)
     setServerOffset(Date.parse(serverAttempt.serverTime) - Date.now())
   }, [])
@@ -257,7 +268,11 @@ export function useExamAttempt() {
   // Auto-submit once when time runs out.
   const timedOut = active && remaining === 0
   useEffect(() => {
-    if (timedOut) submit()
+    if (!timedOut) return undefined
+    const timer = setTimeout(() => {
+      submit()
+    }, 0)
+    return () => clearTimeout(timer)
   }, [timedOut, submit])
 
   const reset = useCallback(() => {
@@ -277,6 +292,7 @@ export function useExamAttempt() {
   return {
     phase, token, attempt, questions, examTitle, answers, flags, remaining, answerable,
     pendingLock, lockedAt, saveState, lastSavedAt, eventState, result, submitting, submitError,
+    extensionNotice, clearExtensionNotice: () => setExtensionNotice(null),
     begin, recover, chooseAnswer, toggleFlag, logEvent, submit, reset,
   }
 }
