@@ -1,0 +1,33 @@
+services:
+  - type: web
+    name: athena-backend
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: backend
+    buildCommand: npm install && npx prisma generate && npx prisma migrate deploy || true
+    startCommand: node server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: ATHENA_ADMIN_USERNAME
+        value: admin
+      - key: ATHENA_ADMIN_PASSWORD
+        generateValue: true
+      - key: ATHENA_JWT_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: athena-db
+          property: connectionString
+
+databases:
+  - name: athena-db
+    plan: free
+    region: oregon
+    databaseName: athena
+    user: athena_user

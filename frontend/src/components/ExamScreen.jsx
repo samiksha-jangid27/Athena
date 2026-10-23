@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { api } from '../services/api.js'
 import { formatDuration, syncLabel } from '../lib/exam.js'
 import { answerSummary, filterQuestions, keyAction, timerLevel } from '../lib/navigation.js'
 import Button from './ui/Button.jsx'
@@ -99,18 +100,35 @@ export default function ExamScreen({ exam, camera, athena }) {
       setScreenOk(ok)
       logEvent(ok ? 'screen-capture-restored' : 'screen-capture-failed')
     })
+    const offScreenSnap = athena.onScreenSnapshotCaptured?.((base64) => {
+      if (exam.token && base64) {
+        api.student.uploadEvidence(exam.token, 'screen', base64).catch(() => {})
+      }
+    })
     const offCamera = athena.onCameraSnapshotRequest(async () => {
       const bytes = await snapshot().catch(() => null)
-      if (bytes) athena.saveCameraSnapshot(bytes, sessionId).catch(() => {})
+      if (bytes) {
+        athena.saveCameraSnapshot(bytes, sessionId).catch(() => {})
+        if (exam.token) {
+          const blob = new Blob([bytes], { type: 'image/jpeg' })
+          const reader = new FileReader()
+          reader.onloadend = () => {
+            const base64 = reader.result
+            if (base64) api.student.uploadEvidence(exam.token, 'camera', base64).catch(() => {})
+          }
+          reader.readAsDataURL(blob)
+        }
+      }
       checkRunningApps()
     })
     athena.startProctoring(sessionId)
     return () => {
       offScreen()
+      if (offScreenSnap) offScreenSnap()
       offCamera()
       athena.stopProctoring()
     }
-  }, [athena, sessionId, logEvent, snapshot, checkRunningApps])
+  }, [athena, sessionId, logEvent, snapshot, checkRunningApps, exam.token])
 
   const { questions, answers, flags, attempt, answerable, pendingLock } = exam
   const question = questions[current]
@@ -250,7 +268,13 @@ export default function ExamScreen({ exam, camera, athena }) {
           {!locked && view === 'practical' && practicalTask ? <PracticalTask task={practicalTask} practical={practical} canEdit={canEdit} /> : locked ? <LockedPanel confirmed={attempt?.status === 'locked'} isFullscreen={isFullscreen} lockedAt={exam.lockedAt} /> : (
           <article className="question-card" aria-labelledby="question-text">
             <div className="question-meta">
-              <span className="eyebrow">Question {current + 1} of {questions.length}</span>
+              <div className="row" style={{ gap: '8px', alignItems: 'center' }}>
+                <span className="eyebrow">Question {current + 1} of {questions.length}</span>
+                {question?.type === 'MSQ' && <span className="badge badge-accent">Multiple Select</span>}
+                {question?.type === 'TRUE_FALSE' && <span className="badge badge-info">True / False</span>}
+                {question?.type === 'SHORT_ANSWER' && <span className="badge badge-warning">Short Answer</span>}
+                {question?.marks !== undefined && <span className="badge">{question.marks} marks</span>}
+              </div>
               <Button variant={flags.includes(question?.id) ? 'secondary' : 'ghost'} size="sm" icon="flag"
                 className={flags.includes(question?.id) ? 'flag-on' : ''} disabled={!canEdit}
                 aria-pressed={flags.includes(question?.id)} onClick={() => exam.toggleFlag(question.id)}>
@@ -258,19 +282,59 @@ export default function ExamScreen({ exam, camera, athena }) {
               </Button>
             </div>
             <h1 id="question-text" className="question-text">{question?.question}</h1>
-            <div className="options" role="radiogroup" aria-labelledby="question-text">
-              {question?.options.map((option, index) => {
-                const selected = answers[question.id] === index
-                return (
-                  <button key={option} type="button" role="radio" aria-checked={selected} disabled={!canEdit}
-                    onClick={() => exam.chooseAnswer(question.id, index)} className={`option ${selected ? 'selected' : ''}`}>
-                    <span className="option-key">{index + 1}</span>
-                    <span className="option-text">{option}</span>
-                    {selected && <Icon name="check" size={16} />}
-                  </button>
-                )
-              })}
-            </div>
+
+            {question?.type === 'SHORT_ANSWER' ? (
+              <div className="short-answer-wrap">
+                <label htmlFor={`sa-${question.id}`} className="field-hint" style={{ fontWeight: 600, display: 'block', marginBottom: '8px' }}>
+                  Write your answer below:
+                </label>
+                <textarea
+                  id={`sa-${question.id}`}
+                  disabled={!canEdit}
+                  rows={5}
+                  className="short-answer-input"
+                  placeholder="Type your response here..."
+                  value={answers[question.id] || ''}
+                  onChange={(e) => exam.chooseAnswer(question.id, e.target.value)}
+                />
+                <span className="field-hint" style={{ marginTop: '4px', display: 'block', textAlign: 'right' }}>
+                  {(answers[question.id] || '').length} characters
+                </span>
+              </div>
+            ) : question?.type === 'MSQ' ? (
+              <div className="options" role="group" aria-labelledby="question-text">
+                {question?.options?.map((option, index) => {
+                  const currentSel = Array.isArray(answers[question.id]) ? answers[question.id] : []
+                  const selected = currentSel.includes(index)
+                  return (
+                    <button key={option} type="button" role="checkbox" aria-checked={selected} disabled={!canEdit}
+                      onClick={() => {
+                        const updated = selected ? currentSel.filter((i) => i !== index) : [...currentSel, index].sort()
+                        exam.chooseAnswer(question.id, updated)
+                      }}
+                      className={`option ${selected ? 'selected' : ''}`}>
+                      <span className="option-key">{selected ? '✓' : index + 1}</span>
+                      <span className="option-text">{option}</span>
+                      {selected && <Icon name="check" size={16} />}
+                    </button>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="options" role="radiogroup" aria-labelledby="question-text">
+                {question?.options?.map((option, index) => {
+                  const selected = answers[question.id] === index
+                  return (
+                    <button key={option} type="button" role="radio" aria-checked={selected} disabled={!canEdit}
+                      onClick={() => exam.chooseAnswer(question.id, index)} className={`option ${selected ? 'selected' : ''}`}>
+                      <span className="option-key">{index + 1}</span>
+                      <span className="option-text">{option}</span>
+                      {selected && <Icon name="check" size={16} />}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </article>
           )}
 

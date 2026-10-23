@@ -15,8 +15,11 @@ out/
 user-camera-snap/
 user-screen-snap/
 evidence/
+backend/data/evidence/
 backend/data/sessions.json.bak
 backend/data/runtime/
+*.db
+*.db-journal
 
 # OS / editor
 .DS_Store

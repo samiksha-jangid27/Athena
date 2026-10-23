@@ -18,4 +18,5 @@ contextBridge.exposeInMainWorld("athena", {
   openEvidenceFolder: (sessionId) => ipcRenderer.invoke("proctoring:open-evidence", sessionId),
   onCameraSnapshotRequest: (callback) => subscribe("proctoring:camera-snap-request", callback),
   onScreenCaptureStatus: (callback) => subscribe("proctoring:screen-status", callback),
+  onScreenSnapshotCaptured: (callback) => subscribe("proctoring:screen-snap-captured", callback),
 });

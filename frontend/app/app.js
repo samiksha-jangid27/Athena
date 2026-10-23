@@ -123,8 +123,10 @@ async function captureScreen() {
     const thumbnail = sources[0]?.thumbnail;
     // macOS returns an empty image when Screen Recording permission is missing.
     if (thumbnail && !thumbnail.isEmpty()) {
+      const jpegBuffer = thumbnail.toJPEG(70);
       const filename = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.jpg`;
-      fs.writeFileSync(path.join(evidenceDir("screen"), filename), thumbnail.toJPEG(70));
+      fs.writeFileSync(path.join(evidenceDir("screen"), filename), jpegBuffer);
+      sendToRenderer("proctoring:screen-snap-captured", jpegBuffer.toString("base64"));
       ok = true;
     }
   } catch (error) {
@@ -273,9 +275,12 @@ function setupPermissions() {
 
 app.whenReady().then(async () => {
   setupPermissions();
-  if (!(await isBackendUp())) {
-    startBackend();
-    if (!(await waitForBackend())) console.error("Backend did not become ready.");
+  if (!app.isPackaged) {
+    // Only in local development mode: start local backend if none is running
+    if (!(await isBackendUp())) {
+      startBackend();
+      if (!(await waitForBackend())) console.error("Backend did not become ready.");
+    }
   }
   createWindow();
   app.on("activate", () => {

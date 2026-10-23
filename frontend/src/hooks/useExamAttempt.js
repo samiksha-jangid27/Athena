@@ -192,8 +192,13 @@ export function useExamAttempt() {
     return merged.recovered
   }, [applyServer])
 
-  const begin = useCallback(async (userId, name) => {
-    const data = await api.start(userId, name)
+  const begin = useCallback(async (userId, name, examId, studentJwt) => {
+    let data
+    if (studentJwt && examId) {
+      data = await api.student.startExam(studentJwt, examId)
+    } else {
+      data = await api.start(userId, name)
+    }
     loadAttempt(data, data.token, null)
     logEvent('exam-started')
   }, [loadAttempt, logEvent])

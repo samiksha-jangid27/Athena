@@ -1,0 +1,195 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  ADMIN
+  STUDENT
+}
+
+enum ExamStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum QuestionType {
+  MCQ
+  MSQ
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  LOCKED
+  SUBMITTED
+  EXPIRED
+}
+
+enum EvidenceKind {
+  CAMERA
+  SCREEN
+}
+
+enum EventSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+model User {
+  id           String     @id @default(uuid())
+  username     String     @unique
+  name         String
+  passwordHash String
+  role         Role       @default(STUDENT)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  attempts     Attempt[]
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model Exam {
+  id              String     @id @default(uuid())
+  title           String
+  description     String?
+  instructions    String?
+  durationMinutes Int        @default(10)
+  totalMarks      Float      @default(100)
+  passingCriteria Float      @default(50)
+  status          ExamStatus @default(DRAFT)
+  scheduledStart  DateTime?
+  scheduledEnd    DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  questions       Question[]
+  attempts        Attempt[]
+
+  @@map("exams")
+}
+
+model Question {
+  id               String            @id @default(uuid())
+  examId           String
+  exam             Exam              @relation(fields: [examId], references: [id], onDelete: Cascade)
+  type             QuestionType      @default(MCQ)
+  prompt           String
+  options          String?           // JSON encoded string of options array
+  correctAnswer    String            // JSON encoded answer (index, array of indices, boolean, or text)
+  marks            Float             @default(1)
+  orderIndex       Int               @default(0)
+  explanation      String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  submittedAnswers SubmittedAnswer[]
+
+  @@map("questions")
+}
+
+model Attempt {
+  id               String             @id @default(uuid())
+  sessionId        String             @unique
+  tokenHash        String             @unique
+  examId           String
+  exam             Exam               @relation(fields: [examId], references: [id])
+  userId           String
+  user             User               @relation(fields: [userId], references: [id])
+  name             String
+  status           AttemptStatus      @default(IN_PROGRESS)
+  startedAt        DateTime           @default(now())
+  deadline         DateTime
+  submittedAt      DateTime?
+  lastSavedAt      DateTime?
+  autoScore        Float              @default(0)
+  manualScore      Float              @default(0)
+  totalScore       Float              @default(0)
+  isReviewed       Boolean            @default(false)
+  reviewNotes      String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  submittedAnswers SubmittedAnswer[]
+  activityEvents   ActivityEvent[]
+  evidence         Evidence[]
+  extensions       AttemptExtension[]
+
+  @@map("attempts")
+}
+
+model SubmittedAnswer {
+  id          String   @id @default(uuid())
+  attemptId   String
+  attempt     Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId  String
+  question    Question @relation(fields: [questionId], references: [id])
+  answerValue String   // JSON encoded value
+  isFlagged   Boolean  @default(false)
+  isCorrect   Boolean?
+  autoMarks   Float    @default(0)
+  manualMarks Float    @default(0)
+  graderNotes String?
+  savedAt     DateTime @default(now())
+
+  @@unique([attemptId, questionId])
+  @@map("submitted_answers")
+}
+
+model ActivityEvent {
+  id         String        @id @default(uuid())
+  eventId    String
+  attemptId  String
+  attempt    Attempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  seq        Int
+  type       String
+  severity   EventSeverity @default(INFO)
+  clientAt   DateTime?
+  receivedAt DateTime      @default(now())
+  detail     String?
+
+  @@unique([attemptId, eventId])
+  @@map("activity_events")
+}
+
+model Evidence {
+  id          String       @id @default(uuid())
+  attemptId   String
+  attempt     Attempt      @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  kind        EvidenceKind
+  storagePath String
+  filename    String
+  byteSize    Int?
+  capturedAt  DateTime     @default(now())
+
+  @@map("evidence")
+}
+
+model AttemptExtension {
+  id        String   @id @default(uuid())
+  attemptId String
+  attempt   Attempt  @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  minutes   Int
+  grantedBy String?
+  grantedAt DateTime @default(now())
+
+  @@map("attempt_extensions")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  action     String
+  targetType String
+  targetId   String?
+  details    String?
+  createdAt  DateTime @default(now())
+
+  @@map("audit_logs")
+}

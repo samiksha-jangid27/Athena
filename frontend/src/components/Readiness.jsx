@@ -63,10 +63,21 @@ function CheckRow({ icon, title, status, tone, children, action }) {
   )
 }
 
-export default function Readiness({ camera, onBegin, athena }) {
-  const { info, online } = useServiceStatus()
+export default function Readiness({ camera, onBegin, athena, student, selectedExam, onBackToCatalog }) {
+  const { info: serviceInfo, online } = useServiceStatus()
+  const info = selectedExam ? {
+    title: selectedExam.title,
+    durationMinutes: selectedExam.durationMinutes,
+    questionCount: selectedExam.questionCount || selectedExam._count?.questions || 0,
+    lockOnFullscreenExit: true,
+    snapshotIntervalSeconds: 30,
+  } : serviceInfo
+
   const [step, setStep] = useState(0)
-  const [identity, setIdentity] = useState({ name: '', studentId: '' })
+  const [identity, setIdentity] = useState({
+    name: student?.name || '',
+    studentId: student?.username || '',
+  })
   const [touched, setTouched] = useState(false)
   const [screen, setScreen] = useState(athena ? { state: 'idle' } : { state: 'unsupported' })
   const [apps, setApps] = useState(athena ? { state: 'idle', found: [] } : { state: 'unsupported', found: [] })
@@ -130,7 +141,7 @@ export default function Readiness({ camera, onBegin, athena }) {
       return
     }
     try {
-      await onBegin(identity.studentId.trim(), identity.name.trim())
+      await onBegin(identity.studentId.trim(), identity.name.trim(), selectedExam?.id)
     } catch {
       if (document.fullscreenElement) await document.exitFullscreen().catch(() => {})
       setError('The exam could not be started because the exam service did not respond. Try again in a moment.')
@@ -144,23 +155,36 @@ export default function Readiness({ camera, onBegin, athena }) {
 
       {step === 0 && (
         <Card className="readiness-card">
-          <div className="eyebrow">Welcome</div>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="eyebrow">Welcome</span>
+            <div className="row" style={{ gap: '8px', alignItems: 'center' }}>
+              <Badge tone={online ? 'success' : online === false ? 'danger' : 'neutral'} dot>
+                {online ? 'Exam Service Ready' : online === false ? 'Service Offline' : 'Checking Service…'}
+              </Badge>
+              {onBackToCatalog && (
+                <Button size="sm" variant="ghost" icon="arrowLeft" onClick={onBackToCatalog}>
+                  Back to Exams
+                </Button>
+              )}
+            </div>
+          </div>
           <h1 className="display" tabIndex={-1} ref={headingRef}>{info?.title || 'Your exam'}</h1>
           <div className="exam-facts">
             <div><Icon name="clock" /><strong>{info ? `${info.durationMinutes} minutes` : '—'}</strong><span>Time limit</span></div>
-            <div><Icon name="list" /><strong>{info ? info.questionCount : '—'}</strong><span>Questions</span></div>
-            <div><Icon name="lock" /><strong>Fullscreen</strong><span>Required</span></div>
+            <div><Icon name="list" /><strong>{info ? `${info.questionCount} questions` : '—'}</strong><span>Questions</span></div>
+            <div><Icon name="lock" /><strong>Fullscreen</strong><span>Required mode</span></div>
           </div>
-          <h2 className="section-title">Before you begin</h2>
+          <h2 className="section-title">Examination Policy & Integrity Rules</h2>
           <ul className="rule-list">
-            <li>The timer is set by the exam server. When it reaches zero, your exam is submitted automatically.</li>
-            <li>Your answers save automatically. If Athena closes or your connection drops, reopen it to continue where you left off.</li>
-            <li><strong>Leaving fullscreen locks your answers</strong> until an instructor unlocks your attempt.</li>
-            <li>You can flag questions to review them later. Flags do not affect your score.</li>
+            <li>The countdown is synchronized with the exam server. When it reaches zero, your responses are submitted automatically.</li>
+            <li>Your answers save automatically. If Athena closes or the connection drops, reopen the app to continue where you left off.</li>
+            <li><strong>Leaving fullscreen immediately locks answering</strong> until an instructor reviews the event and unlocks your attempt.</li>
+            <li>Athena periodically takes camera photos and desktop screenshots during the exam to verify integrity. Evidence is stored locally on this machine.</li>
+            <li>You can flag questions to review them later before submitting. Flags do not affect your score.</li>
           </ul>
           {online === false && <Callout tone="danger" role="alert">The exam service is offline. Start the backend, or ask your instructor. This page checks again every few seconds.</Callout>}
           <div className="card-actions">
-            <Button iconRight="arrowRight" onClick={() => setStep(1)} disabled={!online}>Get started</Button>
+            <Button size="lg" iconRight="arrowRight" onClick={() => setStep(1)} disabled={!online}>Get started</Button>
           </div>
         </Card>
       )}
@@ -242,6 +266,11 @@ export default function Readiness({ camera, onBegin, athena }) {
             </div>
             <div className={`camera-frame ${camera.status === 'live' ? 'live' : ''}`}>
               <video ref={videoRef} autoPlay playsInline muted aria-label="Camera preview" />
+              {camera.status === 'live' && (
+                <div className="camera-overlay">
+                  <div className="camera-target" title="Center face within guide" />
+                </div>
+              )}
               {camera.status !== 'live' && <div className="camera-placeholder"><Icon name="camera" size={28} /><span>Camera preview</span></div>}
             </div>
           </div>

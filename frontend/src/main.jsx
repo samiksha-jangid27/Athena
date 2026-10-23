@@ -6,6 +6,7 @@ import './styles/layout.css'
 import './styles/readiness.css'
 import './styles/exam.css'
 import './styles/instructor.css'
+import './styles/portal.css'
 import App from './App.jsx'
 
 createRoot(document.getElementById('root')).render(

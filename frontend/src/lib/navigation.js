@@ -1,8 +1,17 @@
 // Pure helpers for the question navigator and submission summary.
 
 export function questionState(question, answers, flags) {
+  const ans = answers[question.id]
+  let isAnswered = false
+  if (Array.isArray(ans)) {
+    isAnswered = ans.length > 0
+  } else if (typeof ans === 'string') {
+    isAnswered = ans.trim().length > 0
+  } else if (ans !== undefined && ans !== null) {
+    isAnswered = true
+  }
   return {
-    answered: answers[question.id] !== undefined,
+    answered: isAnswered,
     flagged: flags.includes(question.id),
   }
 }
@@ -44,5 +53,9 @@ export function keyAction(event, optionCount) {
   if (event.key === 'f' || event.key === 'F') return { type: 'flag' }
   const number = Number(event.key)
   if (Number.isInteger(number) && number >= 1 && number <= optionCount) return { type: 'choose', index: number - 1 }
+  if (typeof event.key === 'string' && event.key.length === 1) {
+    const code = event.key.toUpperCase().charCodeAt(0)
+    if (code >= 65 && code < 65 + optionCount) return { type: 'choose', index: code - 65 }
+  }
   return null
 }

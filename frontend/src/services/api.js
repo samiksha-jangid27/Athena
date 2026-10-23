@@ -1,16 +1,44 @@
 import { HttpError } from '../lib/exam.js'
 
-export const API_URL = import.meta.env.VITE_ATHENA_API_URL || 'http://127.0.0.1:3000'
+const STORED_URL_KEY = 'athena.api_url'
 
-async function request(path, { method = 'GET', token, instructorKey, body, timeoutMs = 8000 } = {}) {
+export function getApiUrl() {
+  if (typeof window !== 'undefined') {
+    const stored = window.localStorage.getItem(STORED_URL_KEY)
+    if (stored && stored.trim()) return stored.trim()
+  }
+  if (import.meta.env.VITE_ATHENA_API_URL) {
+    return import.meta.env.VITE_ATHENA_API_URL
+  }
+  // Never default to localhost in a production build!
+  if (import.meta.env.PROD) {
+    return 'https://athena-exam-backend.onrender.com'
+  }
+  return 'http://127.0.0.1:3000'
+}
+
+export function setApiUrl(url) {
+  if (typeof window !== 'undefined') {
+    if (!url || !url.trim()) {
+      window.localStorage.removeItem(STORED_URL_KEY)
+    } else {
+      window.localStorage.setItem(STORED_URL_KEY, url.trim())
+    }
+  }
+}
+
+export const API_URL = getApiUrl()
+
+async function request(path, { method = 'GET', token, body, timeoutMs = 12000, headers: extraHeaders = {} } = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const currentBase = getApiUrl().replace(/\/+$/, '')
   try {
-    const headers = {}
+    const headers = { ...extraHeaders }
     if (body !== undefined) headers['Content-Type'] = 'application/json'
     if (token) headers.Authorization = `Bearer ${token}`
-    if (instructorKey) headers['x-instructor-key'] = instructorKey
-    const response = await fetch(`${API_URL}${path}`, {
+
+    const response = await fetch(`${currentBase}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -25,7 +53,70 @@ async function request(path, { method = 'GET', token, instructorKey, body, timeo
 }
 
 export const api = {
-  health: () => request('/', { timeoutMs: 3000 }),
+  getApiUrl,
+  setApiUrl,
+  health: () => request('/health', { timeoutMs: 6000 }),
+
+  // ---------------- Authentication ----------------
+  auth: {
+    login: (username, password) =>
+      request('/api/auth/login', { method: 'POST', body: { username, password } }),
+    bootstrapAdmin: (username, password, name) =>
+      request('/api/auth/bootstrap-admin', { method: 'POST', body: { username, password, name } }),
+    me: (token) => request('/api/auth/me', { token }),
+  },
+
+  // ---------------- Student API ----------------
+  student: {
+    listExams: (token) => request('/api/student/exams', { token }),
+    startExam: (token, examId) =>
+      request(`/api/student/exams/${encodeURIComponent(examId)}/start`, { method: 'POST', token }),
+    getAttempt: (attemptToken) =>
+      request('/api/student/attempt', { token: attemptToken }),
+    saveAnswers: (attemptToken, answers, flags) =>
+      request('/api/student/attempt/answers', { method: 'PUT', token: attemptToken, body: { answers, flags } }),
+    sendEvents: (attemptToken, events) =>
+      request('/api/student/attempt/events', { method: 'POST', token: attemptToken, body: { events } }),
+    uploadEvidence: (attemptToken, kind, base64) =>
+      request('/api/student/attempt/evidence', { method: 'POST', token: attemptToken, body: { kind, base64 }, timeoutMs: 25000 }),
+    submit: (attemptToken, answers, flags) =>
+      request('/api/student/attempt/submit', { method: 'POST', token: attemptToken, body: { answers, flags } }),
+  },
+
+  // ---------------- Admin API ----------------
+  admin: {
+    listExams: (token) => request('/api/admin/exams', { token }),
+    createExam: (token, data) => request('/api/admin/exams', { method: 'POST', token, body: data }),
+    getExam: (token, id) => request(`/api/admin/exams/${encodeURIComponent(id)}`, { token }),
+    updateExam: (token, id, data) =>
+      request(`/api/admin/exams/${encodeURIComponent(id)}`, { method: 'PUT', token, body: data }),
+    publishExam: (token, id) =>
+      request(`/api/admin/exams/${encodeURIComponent(id)}/publish`, { method: 'POST', token }),
+    unpublishExam: (token, id) =>
+      request(`/api/admin/exams/${encodeURIComponent(id)}/unpublish`, { method: 'POST', token }),
+    addQuestion: (token, examId, data) =>
+      request(`/api/admin/exams/${encodeURIComponent(examId)}/questions`, { method: 'POST', token, body: data }),
+    updateQuestion: (token, questionId, data) =>
+      request(`/api/admin/questions/${encodeURIComponent(questionId)}`, { method: 'PUT', token, body: data }),
+    deleteQuestion: (token, questionId) =>
+      request(`/api/admin/questions/${encodeURIComponent(questionId)}`, { method: 'DELETE', token }),
+    listStudents: (token) => request('/api/admin/students', { token }),
+    createStudent: (token, data) => request('/api/admin/students', { method: 'POST', token, body: data }),
+    deleteStudent: (token, id) =>
+      request(`/api/admin/students/${encodeURIComponent(id)}`, { method: 'DELETE', token }),
+    listAttempts: (token) => request('/api/admin/attempts', { token }),
+    getAttempt: (token, id) => request(`/api/admin/attempts/${encodeURIComponent(id)}`, { token }),
+    unlockAttempt: (token, id) =>
+      request(`/api/admin/attempts/${encodeURIComponent(id)}/unlock`, { method: 'POST', token }),
+    extendAttempt: (token, id, minutes) =>
+      request(`/api/admin/attempts/${encodeURIComponent(id)}/extend`, { method: 'POST', token, body: { minutes } }),
+    gradeAttempt: (token, id, data) =>
+      request(`/api/admin/attempts/${encodeURIComponent(id)}/grade`, { method: 'PUT', token, body: data }),
+    exportUrl: (id) => `${getApiUrl().replace(/\/+$/, '')}/api/admin/exams/${encodeURIComponent(id)}/export`,
+    evidenceUrl: (evidenceId) => `${getApiUrl().replace(/\/+$/, '')}/api/admin/evidence/${encodeURIComponent(evidenceId)}`,
+  },
+
+  // ---------------- Legacy Compatibility ----------------
   info: () => request('/exam/info', { timeoutMs: 3000 }),
   start: (userId, name) => request('/exam/start', { method: 'POST', body: { userId, name } }),
   getAttempt: (token) => request('/exam/attempt', { token }),
@@ -39,14 +130,9 @@ export const api = {
     request(`/practical/${encodeURIComponent(taskId)}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE', token }),
   checkpoint: (token, taskId, label) =>
     request(`/practical/${encodeURIComponent(taskId)}/checkpoints`, { method: 'POST', token, body: { label } }),
-  practicalReview: (key, sessionId) => request(`/instructor/attempts/${encodeURIComponent(sessionId)}/practical`, { instructorKey: key }),
-  recordTest: (key, sessionId, taskId, testId, status) =>
-    request(`/instructor/attempts/${encodeURIComponent(sessionId)}/practical/${encodeURIComponent(taskId)}/tests/${encodeURIComponent(testId)}`,
-      { method: 'PUT', instructorKey: key, body: { status } }),
-  fileUrl: (sessionId, fileId) => `${API_URL}/instructor/attempts/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}`,
-  listAttempts: (key) => request('/instructor/attempts', { instructorKey: key }),
+  listAttempts: (key) => request('/instructor/attempts', { headers: { 'x-instructor-key': key } }),
   extend: (key, sessionId, minutes) =>
-    request(`/instructor/attempts/${encodeURIComponent(sessionId)}/extend`, { method: 'POST', instructorKey: key, body: { minutes } }),
+    request(`/instructor/attempts/${encodeURIComponent(sessionId)}/extend`, { method: 'POST', headers: { 'x-instructor-key': key }, body: { minutes } }),
   unlock: (key, sessionId) =>
-    request(`/instructor/attempts/${encodeURIComponent(sessionId)}/unlock`, { method: 'POST', instructorKey: key, body: {} }),
+    request(`/instructor/attempts/${encodeURIComponent(sessionId)}/unlock`, { method: 'POST', headers: { 'x-instructor-key': key }, body: {} }),
 }
