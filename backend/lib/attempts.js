@@ -23,12 +23,14 @@ const EVENT_TYPES = new Set([
   "network-offline",
   "network-online",
   "answers-recovered",
+  "disallowed-app-detected",
 ]);
 
 // How serious each event is, for the instructor timeline.
 const SEVERITY = {
   "fullscreen-exit": "critical",
   "camera-lost": "critical",
+  "disallowed-app-detected": "critical",
   "screen-capture-failed": "warning",
   "window-blur": "warning",
   "network-offline": "warning",
@@ -115,6 +117,10 @@ function saveAnswers(attempt, { answers, flags = [] }, questions, now = Date.now
 // Records client events. Each event carries a client-generated id so a
 // retried request never records the same event twice.
 function recordEvents(attempt, events, now = Date.now()) {
+  refreshStatus(attempt, now);
+  if (isClosed(attempt)) {
+    return `attempt is ${attempt.status}`;
+  }
   if (!Array.isArray(events) || events.length === 0 || events.length > 50) {
     return "events must be an array of 1 to 50 items";
   }

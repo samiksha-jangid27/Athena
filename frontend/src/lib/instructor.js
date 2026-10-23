@@ -61,6 +61,7 @@ export const EVENT_LABEL = {
   'network-offline': 'Network lost',
   'network-online': 'Network restored',
   'answers-recovered': 'Attempt resumed after restart',
+  'disallowed-app-detected': 'Disallowed application detected',
   'instructor-unlocked': 'Unlocked by instructor',
   'time-extended': 'Time extended',
   submitted: 'Submitted',
@@ -70,7 +71,7 @@ export const EVENT_LABEL = {
 // device, so this is a reference, not a link.
 export function evidenceHint(event) {
   if (event.type === 'camera-lost' || event.type === 'camera-restored') return 'Camera photos: <userData>/evidence/camera'
-  if (event.type.startsWith('screen-capture') || event.type === 'window-blur' || event.type === 'fullscreen-exit') {
+  if (event.type.startsWith('screen-capture') || event.type === 'window-blur' || event.type === 'fullscreen-exit' || event.type === 'disallowed-app-detected') {
     return 'Screenshots: <userData>/evidence/screen'
   }
   return null

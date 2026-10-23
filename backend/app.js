@@ -123,7 +123,10 @@ function createApp({
       return sendError(res, 409, `attempt is ${attempt.status}`, { attempt: rules.publicAttempt(attempt) });
     }
     const error = rules.recordEvents(attempt, req.body?.events);
-    if (error) return sendError(res, 400, error);
+    if (error) {
+      const status = error.startsWith("attempt is") ? 409 : 400;
+      return sendError(res, status, error, { attempt: rules.publicAttempt(attempt) });
+    }
     store.saveSessions(sessions);
     res.json({ attempt: rules.publicAttempt(attempt) });
   }));

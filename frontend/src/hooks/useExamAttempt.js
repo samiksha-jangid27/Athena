@@ -37,8 +37,8 @@ export function useExamAttempt() {
   const stateRef = useRef({})
   // Latest values for async callbacks (timers, retries).
   useLayoutEffect(() => {
-    stateRef.current = { token, answers, flags }
-  }, [token, answers, flags])
+    stateRef.current = { token, answers, flags, attempt, pendingLock }
+  }, [token, answers, flags, attempt, pendingLock])
 
   const remaining = remainingMs(attempt?.deadline, serverOffset, now)
   const answerable = canAnswer({ status: attempt?.status, pendingLock, remaining })
@@ -71,6 +71,9 @@ export function useExamAttempt() {
       const data = await withRetry(() => api.sendEvents(currentToken, batch), { retries: 2 })
       eventsRef.current = eventsRef.current.slice(batch.length)
       applyServer(data.attempt)
+      if (data.attempt?.status === 'locked' || !eventsRef.current.some((e) => e.type === 'fullscreen-exit')) {
+        setPendingLock(false)
+      }
     } catch (error) {
       if (!isRejection(error)) {
         // Network problem: keep the events queued and try again later.
@@ -78,13 +81,12 @@ export function useExamAttempt() {
         persist()
         return
       }
-      // The server refused them; drop them but say so instead of
-      // pretending they were recorded.
+      // The server refused them (e.g. attempt is already submitted or expired); drop them
       eventsRef.current = eventsRef.current.slice(batch.length)
       setEventState((state) => ({ ...state, rejected: state.rejected + batch.length }))
+      setPendingLock(false)
       applyServer(error.body?.attempt)
     }
-    if (eventsRef.current.length === 0) setPendingLock(false)
     setEventState((state) => ({ ...state, pending: eventsRef.current.length }))
     persist()
   }, [applyServer, persist])
@@ -104,8 +106,14 @@ export function useExamAttempt() {
 
   // ---- Answer saving ----
   const saveNow = useCallback(async () => {
-    const { token: currentToken, answers: currentAnswers, flags: currentFlags } = stateRef.current
+    const { token: currentToken, answers: currentAnswers, flags: currentFlags, attempt: currentAttempt, pendingLock: currentPendingLock } = stateRef.current
     if (!currentToken || !dirtyRef.current) return
+    if (currentPendingLock || currentAttempt?.status === 'locked') return
+    // If there are pending events (e.g. exit event), flush them first so the server locks first
+    if (eventsRef.current.length > 0) {
+      await flushEvents()
+    }
+    if (stateRef.current.attempt?.status === 'locked' || stateRef.current.pendingLock) return
     setSaveState('saving')
     dirtyRef.current = false
     try {
@@ -123,7 +131,7 @@ export function useExamAttempt() {
       }
     }
     persist()
-  }, [applyServer, persist])
+  }, [applyServer, flushEvents, persist])
 
   function markDirty() {
     dirtyRef.current = true

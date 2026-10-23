@@ -98,3 +98,34 @@ test("submit is idempotent and blocks further changes", () => {
   assert.match(rules.saveAnswers(attempt, { answers: { 1: 0 } }, questions, START), /submitted/);
   assert.match(rules.extend(attempt, 5, START), /submitted/);
 });
+
+test("fullscreen exit cannot re-lock an already submitted or expired attempt", () => {
+  const attempt = newAttempt();
+  rules.submit(attempt, START);
+  assert.equal(attempt.status, "submitted");
+  assert.match(rules.recordEvents(attempt, [{ id: "late-fs", type: "fullscreen-exit" }], START + 1000), /submitted/);
+  assert.equal(attempt.status, "submitted");
+
+  const expiredAttempt = newAttempt();
+  const late = START + TEN_MIN + rules.GRACE_MS + 1000;
+  rules.refreshStatus(expiredAttempt, late);
+  assert.equal(expiredAttempt.status, "expired");
+  assert.match(rules.recordEvents(expiredAttempt, [{ id: "late-fs-2", type: "fullscreen-exit" }], late), /expired/);
+  assert.equal(expiredAttempt.status, "expired");
+});
+
+test("fullscreen enter event does not auto-unlock a locked attempt", () => {
+  const attempt = newAttempt();
+  rules.recordEvents(attempt, [{ id: "fs-exit", type: "fullscreen-exit" }], START);
+  assert.equal(attempt.status, "locked");
+  rules.recordEvents(attempt, [{ id: "fs-enter", type: "fullscreen-enter" }], START + 1000);
+  assert.equal(attempt.status, "locked");
+  assert.match(rules.saveAnswers(attempt, { answers: { 1: 0 } }, questions, START + 2000), /locked/);
+});
+
+test("disallowed app detection is recorded with critical severity", () => {
+  const attempt = newAttempt();
+  assert.equal(rules.recordEvents(attempt, [{ id: "app-1", type: "disallowed-app-detected", detail: "Detected: Discord" }], START), null);
+  assert.equal(attempt.events[0].severity, "critical");
+  assert.equal(attempt.events[0].detail, "Detected: Discord");
+});

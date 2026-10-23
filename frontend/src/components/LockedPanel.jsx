@@ -1,30 +1,67 @@
 import Button from './ui/Button.jsx'
 import Icon from './ui/Icon.jsx'
+import Badge from './ui/Badge.jsx'
 
-// Restricted state: replaces the question while answers are locked.
+// Restricted state: replaces the question workspace while answers are locked.
 export default function LockedPanel({ confirmed, isFullscreen, lockedAt }) {
+  const formattedTime = lockedAt ? new Date(lockedAt).toLocaleTimeString() : null
+
   return (
     <section className="locked-panel" role="alert" aria-labelledby="locked-title">
-      <span className="locked-icon"><Icon name="lock" size={22} /></span>
-      <h1 id="locked-title">Answers locked</h1>
-      <p>
-        You left fullscreen{lockedAt ? ` at ${new Date(lockedAt).toLocaleTimeString()}` : ''}. Under this exam’s policy your answers
-        are locked until an instructor reviews the event and unlocks your attempt. Your saved answers are safe.
-      </p>
-      <ol className="locked-steps">
-        <li className={isFullscreen ? 'done' : ''}>
-          <span>{isFullscreen ? <Icon name="check" size={14} /> : 1}</span>
-          Return to fullscreen
-          {!isFullscreen && (
-            <Button size="sm" variant="secondary" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>Enter fullscreen</Button>
-          )}
-        </li>
-        <li><span>2</span>Ask your instructor to unlock your attempt</li>
-      </ol>
-      <p className="subtle">
-        {confirmed ? 'The exam server has recorded the lock.' : 'Sending the lock event to the exam server…'} The timer keeps running.
-        This screen updates automatically when you are unlocked.
-      </p>
+      <div className="locked-header">
+        <span className="locked-icon"><Icon name="lock" size={24} /></span>
+        <div>
+          <div className="locked-status-tag">
+            <Badge tone={confirmed ? 'danger' : 'warning'} dot>
+              {confirmed ? 'Exam Security Lock' : 'Synchronizing Lock…'}
+            </Badge>
+          </div>
+          <h1 id="locked-title">Assessment Locked</h1>
+        </div>
+      </div>
+
+      <div className="locked-summary">
+        <p>
+          Athena detected that you exited fullscreen mode{formattedTime ? ` at ${formattedTime}` : ''}. Under exam integrity rules,
+          all question answering and answer modifications have been immediately suspended.
+        </p>
+        <p className="locked-reassurance">
+          <Icon name="check" size={16} />
+          <strong>Your previously saved answers are safe and stored on the server.</strong>
+        </p>
+      </div>
+
+      <div className="locked-actions-card">
+        <h2 className="section-title">Required steps to continue</h2>
+        <ol className="locked-steps">
+          <li className={isFullscreen ? 'done' : ''}>
+            <span className="step-num">{isFullscreen ? <Icon name="check" size={14} /> : '1'}</span>
+            <div className="step-content">
+              <strong>Return to fullscreen mode</strong>
+              <p className="subtle">You must be in fullscreen before an instructor can restore your exam.</p>
+            </div>
+            {!isFullscreen && (
+              <Button size="sm" variant="secondary" icon="screen" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>
+                Enter fullscreen
+              </Button>
+            )}
+          </li>
+          <li>
+            <span className="step-num">2</span>
+            <div className="step-content">
+              <strong>Contact your instructor or invigilator</strong>
+              <p className="subtle">Inform them of the fullscreen departure. Only an authorised instructor key can unlock your session.</p>
+            </div>
+          </li>
+        </ol>
+      </div>
+
+      <div className="locked-footer">
+        <div className="status-line">
+          <span className="spinner" aria-hidden="true" />
+          <span>The exam countdown continues in the background. This workstation will automatically resume as soon as the instructor unlocks your attempt.</span>
+        </div>
+      </div>
     </section>
   )
 }

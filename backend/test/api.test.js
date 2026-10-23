@@ -80,6 +80,13 @@ test("locked attempts reject answers until an instructor unlocks", async () => {
   assert.equal(rejected.status, 409);
   assert.equal(rejected.body.attempt.status, "locked");
 
+  // Re-entering fullscreen does NOT unlock the attempt
+  const entered = await call("POST", "/exam/events", { token, body: { events: [{ id: "x2", type: "fullscreen-enter", at: new Date().toISOString() }] } });
+  assert.equal(entered.status, 200);
+  assert.equal(entered.body.attempt.status, "locked");
+  const stillRejected = await call("PUT", "/exam/answers", { token, body: { answers: { 1: 1 } } });
+  assert.equal(stillRejected.status, 409);
+
   assert.equal((await call("POST", `/instructor/attempts/${attempt.sessionId}/unlock`)).status, 401);
   assert.equal((await call("POST", `/instructor/attempts/${attempt.sessionId}/unlock`, { key: "wrong" })).status, 401);
   assert.equal((await call("POST", `/instructor/attempts/${attempt.sessionId}/unlock`, { key: KEY })).status, 200);
