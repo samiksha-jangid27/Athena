@@ -75,7 +75,7 @@ function createApp(config = {}) {
         }
       },
       credentials: true,
-      allowedHeaders: ["Content-Type", "Authorization", "x-instructor-key"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-athena-bootstrap-secret"],
     })
   );
 
@@ -91,14 +91,29 @@ function createApp(config = {}) {
 
   // ---------------- Health & Diagnostics ----------------
   app.get(["/", "/health", "/api/health"], async (req, res) => {
-    const dbHealth = await db.checkHealth();
-    res.json({
-      status: "ok",
-      name: "Athena Examination Platform",
-      version: "1.0.0",
-      serverTime: new Date().toISOString(),
-      database: dbHealth,
-    });
+    try {
+      const dbHealth = await db.checkHealth();
+
+      const healthy =
+        dbHealth.status === "connected" &&
+        (process.env.NODE_ENV !== "production" || db.isPostgres);
+
+      return res.status(healthy ? 200 : 503).json({
+        status: healthy ? "ok" : "error",
+        name: "Athena Examination Platform",
+        version: "1.0.0",
+        serverTime: new Date().toISOString(),
+        database: dbHealth,
+      });
+    } catch (err) {
+      console.error("Health check failed:", err.message);
+
+      return res.status(503).json({
+        status: "error",
+        name: "Athena Examination Platform",
+        database: { status: "error" },
+      });
+    }
   });
 
   // ---------------- Authentication Routes ----------------
@@ -152,6 +167,24 @@ function createApp(config = {}) {
 
   // Bootstrap initial admin if no users exist
   app.post("/api/auth/bootstrap-admin", async (req, res) => {
+      if (process.env.NODE_ENV === "production") {
+      const expected = process.env.ATHENA_ADMIN_BOOTSTRAP_SECRET || "";
+      const received = req.get("x-athena-bootstrap-secret") || "";
+
+      const expectedBuffer = Buffer.from(expected);
+      const receivedBuffer = Buffer.from(received);
+
+      if (expected.length < 32) {
+        return sendError(res, 503, "Admin bootstrap is not configured");
+      }
+
+      if (
+        expectedBuffer.length !== receivedBuffer.length ||
+        !crypto.timingSafeEqual(expectedBuffer, receivedBuffer)
+      ) {
+        return sendError(res, 403, "Bootstrap authorization failed");
+      }
+    }
     try {
       const adminCount = await db.users.countAdmins();
       if (adminCount > 0) {

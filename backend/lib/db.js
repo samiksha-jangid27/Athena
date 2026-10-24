@@ -8,19 +8,39 @@ const fs = require("fs");
 const { hashPassword } = require("./auth");
 
 let prismaClient = null;
+const isProduction = process.env.NODE_ENV === "production";
+
 const isPostgresConfigured = Boolean(
   process.env.DATABASE_URL &&
-  (process.env.DATABASE_URL.startsWith("postgres://") || process.env.DATABASE_URL.startsWith("postgresql://"))
+  (process.env.DATABASE_URL.startsWith("postgres://") ||
+    process.env.DATABASE_URL.startsWith("postgresql://"))
 );
+
+if (isProduction && !isPostgresConfigured) {
+  throw new Error(
+    "DATABASE_URL must contain a PostgreSQL connection string in production."
+  );
+}
 
 if (isPostgresConfigured) {
   try {
     const { PrismaClient } = require("@prisma/client");
+
     prismaClient = new PrismaClient({
-      log: process.env.NODE_ENV === "development" ? ["warn", "error"] : ["error"],
+      log: isProduction ? ["error"] : ["warn", "error"],
     });
   } catch (err) {
-    console.warn("Prisma client failed to initialize, falling back to local storage:", err.message);
+    if (isProduction) {
+      throw new Error(
+        `Prisma initialization failed in production: ${err.message}`
+      );
+    }
+
+    console.warn(
+      "Prisma initialization failed; using development fallback:",
+      err.message
+    );
+
     prismaClient = null;
   }
 }

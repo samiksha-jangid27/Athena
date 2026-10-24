@@ -3,7 +3,17 @@ const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const crypto = require("crypto");
 
-const JWT_SECRET = process.env.ATHENA_JWT_SECRET || "athena-dev-jwt-secret-replace-in-production";
+const isProduction = process.env.NODE_ENV === "production";
+const configuredSecret = process.env.ATHENA_JWT_SECRET;
+
+if (isProduction && (!configuredSecret || configuredSecret.length < 32)) {
+  throw new Error(
+    "ATHENA_JWT_SECRET must be set to at least 32 characters in production."
+  );
+}
+
+const JWT_SECRET =
+  configuredSecret || "athena-dev-jwt-secret-replace-in-production";
 
 async function hashPassword(plain) {
   if (typeof plain !== "string" || !plain.trim()) throw new Error("Password must be a non-empty string");
