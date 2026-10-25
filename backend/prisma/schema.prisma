@@ -165,6 +165,7 @@ model Evidence {
   kind        EvidenceKind
   storagePath String
   filename    String
+  data        Bytes?
   byteSize    Int?
   capturedAt  DateTime     @default(now())
 
