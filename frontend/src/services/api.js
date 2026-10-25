@@ -2,22 +2,17 @@ import { HttpError } from '../lib/exam.js'
 
 const STORED_URL_KEY = 'athena.api_url'
 
+// The live hosted backend, used when no URL has been configured.
+const DEFAULT_API_URL = 'https://athena-backend-2a0l.onrender.com'
+
 export function getApiUrl() {
-  if (import.meta.env.PROD) {
-    if (typeof window !== 'undefined' && window.localStorage.getItem(STORED_URL_KEY)) {
-      window.localStorage.removeItem(STORED_URL_KEY)
-    }
-    return 'https://athena-backend-2a0l.onrender.com'
-  }
-  if (typeof window !== 'undefined') {
-    const stored = window.localStorage.getItem(STORED_URL_KEY)
-    if (stored && stored.trim()) return stored.trim()
-  }
-  if (import.meta.env.VITE_ATHENA_API_URL) {
-    return import.meta.env.VITE_ATHENA_API_URL
-  }
-  // Never default to localhost in a production build!
-  return 'http://127.0.0.1:3000'
+  // An explicit override always wins, in development and in packaged builds,
+  // so the Server Configuration dialog really changes the endpoint in use.
+  const stored = typeof window !== 'undefined' ? window.localStorage.getItem(STORED_URL_KEY) : ''
+  const configured = stored?.trim() || (import.meta.env.VITE_ATHENA_API_URL || '').trim()
+  if (configured) return configured.replace(/\/+$/, '')
+  // Never default to localhost in a production build.
+  return import.meta.env.PROD ? DEFAULT_API_URL : 'http://127.0.0.1:3000'
 }
 
 export function setApiUrl(url) {
