@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../services/api.js'
 import { validateIdentity } from '../lib/exam.js'
 import Button from './ui/Button.jsx'
@@ -99,7 +99,7 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
     headingRef.current?.focus()
   }, [step])
 
-  async function checkScreen() {
+  const checkScreen = useCallback(async () => {
     setScreen({ state: 'checking' })
     try {
       const result = await athena.checkScreenCapture()
@@ -107,9 +107,9 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
     } catch {
       setScreen({ state: 'blocked' })
     }
-  }
+  }, [athena])
 
-  async function checkApps() {
+  const checkApps = useCallback(async () => {
     setApps({ state: 'checking', found: [], error: null })
     try {
       const result = await athena.checkBackgroundApps()
@@ -125,7 +125,16 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
     } catch (err) {
       setApps({ state: 'error', found: [], error: err.message || 'Scan error' })
     }
-  }
+  }, [athena])
+
+  useEffect(() => {
+    if (step !== 2 || !athena) return undefined
+    const timer = setTimeout(() => {
+      checkScreen()
+      checkApps()
+    }, 0)
+    return () => clearTimeout(timer)
+  }, [step, athena, checkApps, checkScreen])
 
   const screenReady = screen.state === 'ok' || screen.state === 'unsupported'
   const checksReady = Boolean(online && camera.status === 'live' && screenReady && apps.state !== 'found' && apps.state !== 'checking')
