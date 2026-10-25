@@ -22,6 +22,7 @@ let mainWindow = null;
 let backendProcess = null;
 let snapshotTimer = null;
 let lastScreenOk = null;
+let closeAfterSubmission = false;
 
 // ---------------- Backend ----------------
 
@@ -198,6 +199,14 @@ handle("proctoring:check-apps", async () => {
 
 handle("proctoring:stop", () => {
   stopProctoring();
+  currentSessionId = null;
+  return true;
+});
+
+handle("app:close-response", (submitted) => {
+  if (!submitted) return false;
+  closeAfterSubmission = true;
+  mainWindow?.close();
   return true;
 });
 
@@ -246,7 +255,14 @@ function createWindow() {
   mainWindow.webContents.on("before-input-event", (event, input) => {
     if (isProhibitedShortcut(input, { isPackaged: app.isPackaged })) {
       event.preventDefault();
+      sendToRenderer("security:shortcut-blocked", input.key || "unknown");
     }
+  });
+
+  mainWindow.on("close", (event) => {
+    if (closeAfterSubmission || !currentSessionId || mainWindow.isDestroyed()) return;
+    event.preventDefault();
+    sendToRenderer("app:close-request");
   });
 
   mainWindow.on("closed", () => {
