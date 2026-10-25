@@ -2,17 +2,17 @@ import { HttpError } from '../lib/exam.js'
 
 const STORED_URL_KEY = 'athena.api_url'
 
-// The live hosted backend, used when no URL has been configured.
-const DEFAULT_API_URL = 'https://athena-backend-2a0l.onrender.com'
+const ENV_API_URL = (import.meta.env.VITE_ATHENA_API_URL || '').replace(/\/+$/, '')
+const DEFAULT_HOST = 'https://athena-backend-2a0l.onrender.com'
 
 export function getApiUrl() {
-  // An explicit override always wins, in development and in packaged builds,
-  // so the Server Configuration dialog really changes the endpoint in use.
+  // Packaged builds are pinned to the backend they were built for: a leftover
+  // or tampered value in local storage must never be able to repoint the exam
+  // client at a different server.
+  if (import.meta.env.PROD) return ENV_API_URL || DEFAULT_HOST
   const stored = typeof window !== 'undefined' ? window.localStorage.getItem(STORED_URL_KEY) : ''
-  const configured = stored?.trim() || (import.meta.env.VITE_ATHENA_API_URL || '').trim()
-  if (configured) return configured.replace(/\/+$/, '')
-  // Never default to localhost in a production build.
-  return import.meta.env.PROD ? DEFAULT_API_URL : 'http://127.0.0.1:3000'
+  if (stored?.trim()) return stored.trim().replace(/\/+$/, '')
+  return ENV_API_URL || 'http://127.0.0.1:3000'
 }
 
 export function setApiUrl(url) {
