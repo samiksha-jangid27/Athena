@@ -50,6 +50,18 @@ async function request(path, { method = 'GET', token, body, timeoutMs = 12000, h
   } finally {
     clearTimeout(timer)
   }
+
+}
+
+async function fetchEvidence(evidenceId, token) {
+  const response = await fetch(`${getApiUrl().replace(/\/+$/, '')}/api/admin/evidence/${encodeURIComponent(evidenceId)}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new HttpError(response.status, body)
+  }
+  return response.blob()
 }
 
 export const api = {
@@ -113,7 +125,7 @@ export const api = {
     gradeAttempt: (token, id, data) =>
       request(`/api/admin/attempts/${encodeURIComponent(id)}/grade`, { method: 'PUT', token, body: data }),
     exportUrl: (id) => `${getApiUrl().replace(/\/+$/, '')}/api/admin/exams/${encodeURIComponent(id)}/export`,
-    evidenceUrl: (evidenceId) => `${getApiUrl().replace(/\/+$/, '')}/api/admin/evidence/${encodeURIComponent(evidenceId)}`,
+    fetchEvidence: (token, evidenceId) => fetchEvidence(evidenceId, token),
   },
 
   // ---------------- Legacy Compatibility ----------------
@@ -130,6 +142,16 @@ export const api = {
     request(`/practical/${encodeURIComponent(taskId)}/files/${encodeURIComponent(fileId)}`, { method: 'DELETE', token }),
   checkpoint: (token, taskId, label) =>
     request(`/practical/${encodeURIComponent(taskId)}/checkpoints`, { method: 'POST', token, body: { label } }),
+  practicalReview: (key, sessionId) =>
+    request(`/instructor/attempts/${encodeURIComponent(sessionId)}/practical`, { headers: { 'x-instructor-key': key } }),
+  fileUrl: (sessionId, fileId) =>
+    `${getApiUrl().replace(/\/+$/, '')}/instructor/attempts/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(fileId)}`,
+  recordTest: (key, sessionId, taskId, testId, status) =>
+    request(`/instructor/attempts/${encodeURIComponent(sessionId)}/practical/${encodeURIComponent(taskId)}/tests/${encodeURIComponent(testId)}`, {
+      method: 'PUT',
+      headers: { 'x-instructor-key': key },
+      body: { status },
+    }),
   listAttempts: (key) => request('/instructor/attempts', { headers: { 'x-instructor-key': key } }),
   extend: (key, sessionId, minutes) =>
     request(`/instructor/attempts/${encodeURIComponent(sessionId)}/extend`, { method: 'POST', headers: { 'x-instructor-key': key }, body: { minutes } }),
