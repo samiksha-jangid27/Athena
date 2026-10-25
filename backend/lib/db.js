@@ -498,7 +498,7 @@ const db = {
           where: { sessionId },
           include: {
             user: { select: { id: true, username: true, name: true } },
-            exam: true,
+            exam: { include: { questions: { select: { id: true, prompt: true, marks: true } } } },
             submittedAnswers: true,
             activityEvents: { orderBy: { seq: "asc" } },
             evidence: true,
@@ -510,6 +510,11 @@ const db = {
       if (!attempt) return null;
       const user = memoryStore.users.find((u) => u.id === attempt.userId);
       const exam = memoryStore.exams.find((e) => e.id === attempt.examId);
+      if (exam) {
+        exam.questions = memoryStore.questions
+          .filter((question) => question.examId === attempt.examId)
+          .map(({ id, prompt, marks }) => ({ id, prompt, marks }));
+      }
       const submittedAnswers = memoryStore.submittedAnswers.filter((sa) => sa.attemptId === attempt.id);
       const activityEvents = memoryStore.activityEvents
         .filter((ae) => ae.attemptId === attempt.id)
@@ -834,19 +839,20 @@ const db = {
       }
     },
 
-    async saveEvidence(attemptId, { kind, storagePath, filename, byteSize }) {
-      const data = {
+    async saveEvidence(attemptId, { kind, storagePath, filename, byteSize, data: evidenceData }) {
+      const recordData = {
         attemptId,
         kind: kind.toUpperCase(),
         storagePath,
         filename,
+        data: evidenceData || null,
         byteSize: byteSize || 0,
         capturedAt: new Date(),
       };
       if (prismaClient) {
-        return prismaClient.evidence.create({ data });
+        return prismaClient.evidence.create({ data: recordData });
       }
-      const record = { id: crypto.randomUUID(), ...data };
+      const record = { id: crypto.randomUUID(), ...recordData };
       memoryStore.evidence.push(record);
       return record;
     },
