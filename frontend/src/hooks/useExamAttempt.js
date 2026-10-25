@@ -262,9 +262,11 @@ export function useExamAttempt() {
       applyServer(data.attempt)
       setResult(data.result)
       clearLocal()
+      return true
     } catch {
       submittingRef.current = false
       setSubmitError('Could not reach the exam service. Your answers are saved on this device. Try again.')
+      return false
     } finally {
       setSubmitting(false)
     }
