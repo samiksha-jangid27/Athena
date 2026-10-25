@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../services/api.js'
-import { validateIdentity } from '../lib/exam.js'
+import { validateIdentity, startErrorMessage } from '../lib/exam.js'
 import Button from './ui/Button.jsx'
 import Card from './ui/Card.jsx'
 import Badge from './ui/Badge.jsx'
@@ -19,13 +19,14 @@ const CAMERA = {
   lost: { tone: 'danger', label: 'Disconnected', help: 'The camera stopped. Reconnect it and try again.' },
 }
 
+// Checks the database-backed health endpoint, the same service the exam flow
+// uses, instead of the legacy JSON-file endpoint.
 function useServiceStatus() {
-  const [info, setInfo] = useState(null)
   const [online, setOnline] = useState(null)
   useEffect(() => {
     let cancelled = false
-    const check = () => api.info()
-      .then((data) => { if (!cancelled) { setInfo(data); setOnline(true) } })
+    const check = () => api.health()
+      .then(() => { if (!cancelled) setOnline(true) })
       .catch(() => { if (!cancelled) setOnline(false) })
     check()
     const timer = setInterval(check, 5000)
@@ -34,7 +35,7 @@ function useServiceStatus() {
       clearInterval(timer)
     }
   }, [])
-  return { info, online }
+  return { online }
 }
 
 function Stepper({ step }) {
@@ -64,14 +65,14 @@ function CheckRow({ icon, title, status, tone, children, action }) {
 }
 
 export default function Readiness({ camera, onBegin, athena, student, selectedExam, onBackToCatalog }) {
-  const { info: serviceInfo, online } = useServiceStatus()
+  const { online } = useServiceStatus()
   const info = selectedExam ? {
     title: selectedExam.title,
     durationMinutes: selectedExam.durationMinutes,
     questionCount: selectedExam.questionCount || selectedExam._count?.questions || 0,
     lockOnFullscreenExit: true,
     snapshotIntervalSeconds: 10,
-  } : serviceInfo
+  } : null
 
   const [step, setStep] = useState(0)
   const [identity, setIdentity] = useState({
@@ -151,9 +152,9 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
     }
     try {
       await onBegin(identity.studentId.trim(), identity.name.trim(), selectedExam?.id)
-    } catch {
+    } catch (err) {
       if (document.fullscreenElement) await document.exitFullscreen().catch(() => {})
-      setError('The exam could not be started because the exam service did not respond. Try again in a moment.')
+      setError(startErrorMessage(err))
       setStarting(false)
     }
   }

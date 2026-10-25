@@ -89,6 +89,21 @@ test('examPhase picks recovery, finished, active and welcome screens', async () 
   assert.equal(examPhase({ recovery: 'done' }), 'welcome')
 })
 
+test('startErrorMessage surfaces the real server error, not a blanket outage', async () => {
+  const { startErrorMessage } = await import('./exam.js')
+  // The server's own message wins for a rejected start.
+  assert.equal(startErrorMessage(new HttpError(409, { message: 'You have already completed this exam.' })), 'You have already completed this exam.')
+  assert.equal(startErrorMessage(new HttpError(404, { message: 'Exam is not published or does not exist' })), 'Exam is not published or does not exist')
+  assert.equal(startErrorMessage(new HttpError(500, { message: 'relation "attempts" does not exist' })), 'relation "attempts" does not exist')
+  assert.equal(startErrorMessage(new HttpError(401, { message: 'Invalid or expired token' })), 'Invalid or expired token')
+  // Actionable fallbacks when the server sends no message.
+  assert.match(startErrorMessage(new HttpError(401, {})), /sign-in has expired/)
+  assert.match(startErrorMessage(new HttpError(403, {})), /not allowed/)
+  assert.match(startErrorMessage(new HttpError(503, {})), /error \(503\)/)
+  // Only a genuine network failure uses the outage wording.
+  assert.match(startErrorMessage(new TypeError('Failed to fetch')), /did not respond/)
+})
+
 test('isRejection separates server refusals from network failures', async () => {
   const { isRejection } = await import('./exam.js')
   assert.equal(isRejection(new HttpError(409, {})), true)
