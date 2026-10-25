@@ -24,19 +24,6 @@
       "app": "frontend",
       "output": "release"
     },
-    "extraResources": [
-      {
-        "from": "backend",
-        "to": "backend",
-        "filter": [
-          "**/*",
-          "!test/**",
-          "!data/sessions.json",
-          "!data/sessions.json.tmp",
-          "!data/artifacts/**"
-        ]
-      }
-    ],
     "mac": {
       "target": "dmg",
       "category": "public.app-category.education",
@@ -51,7 +38,11 @@
       "app/**/*",
       "!app/**/*.test.js",
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "!**/.env",
+      "!**/.env.*",
+      "!**/*.pem",
+      "!**/*.key"
     ]
   }
 }
