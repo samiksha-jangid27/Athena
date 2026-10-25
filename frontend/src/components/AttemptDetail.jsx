@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../services/api.js'
 import { formatDuration } from '../lib/exam.js'
-import { EVENT_LABEL, STATUS_LABEL, STATUS_TONE, attemptRemaining, evidenceHint, validateExtension } from '../lib/instructor.js'
+import { STATUS_LABEL, STATUS_TONE, attemptRemaining, normalizeStatus, validateExtension } from '../lib/instructor.js'
 import Badge from './ui/Badge.jsx'
 import Button from './ui/Button.jsx'
 import Field from './ui/Field.jsx'
@@ -9,15 +9,40 @@ import Modal from './ui/Modal.jsx'
 import { useToast } from './ui/Toast.jsx'
 import PracticalReview from './PracticalReview.jsx'
 
-const SEVERITY_TONE = { critical: 'danger', warning: 'warning', info: 'neutral' }
-
 function time(value) {
   return value ? new Date(value).toLocaleTimeString() : '—'
 }
 
+function EvidenceGroup({ title, items, total, urls, errors, onPreview, onImageError, onLoadEarlier }) {
+  return (
+    <section style={{ marginBottom: '16px' }}>
+      <h3 style={{ fontSize: 'var(--text-sm)', marginBottom: '8px' }}>{title} ({total})</h3>
+      {items.length === 0 ? <p className="subtle">No captures available.</p> : (
+        <div className="evidence-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: '8px' }}>
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="evidence-thumb-btn"
+              style={{ border: '1px solid var(--border)', borderRadius: '4px', overflow: 'hidden', background: '#000', cursor: urls[item.id] ? 'pointer' : 'default', padding: 0 }}
+              onClick={() => urls[item.id] && onPreview(item)}>
+              {urls[item.id]
+                ? <img src={urls[item.id]} alt={`${title} captured ${time(item.capturedAt)}`} style={{ width: '100%', height: '72px', objectFit: 'cover' }} onError={() => onImageError(item.id)} />
+                : <span style={{ display: 'block', height: '72px', padding: '24px 4px 0', color: 'var(--text-muted)', fontSize: '11px' }}>{errors[item.id] || 'Loading image…'}</span>}
+              <span style={{ fontSize: '10px', display: 'block', color: 'var(--text-muted)', textAlign: 'center', padding: '4px' }}>
+                {time(item.capturedAt)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+      {items.length < total && <Button variant="ghost" size="sm" onClick={onLoadEarlier}>Load earlier</Button>}
+    </section>
+  )
+}
+
 export default function AttemptDetail({ attempt, adminToken, instructorKey, serverOffset, now, onChanged, onClose }) {
   const notify = useToast()
-  const [severity, setSeverity] = useState('all')
   const [minutes, setMinutes] = useState('5')
   const [confirm, setConfirm] = useState(null) // 'unlock' | 'extend'
   const [busy, setBusy] = useState(false)
@@ -29,41 +54,58 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
   const [previewEvidence, setPreviewEvidence] = useState(null)
   const [detail, setDetail] = useState(null)
   const [evidenceUrls, setEvidenceUrls] = useState({})
+  const [evidenceErrors, setEvidenceErrors] = useState({})
+  const [evidenceLimit, setEvidenceLimit] = useState(24)
+  const [detailError, setDetailError] = useState('')
 
   useEffect(() => {
     if (!adminToken) return undefined
     let active = true
-    api.admin.getAttempt(adminToken, attempt.sessionId)
-      .then((response) => { if (active) setDetail(response.attempt) })
-      .catch(() => {})
-    return () => { active = false }
-  }, [adminToken, attempt.sessionId])
+    const load = () => api.admin.getAttempt(adminToken, attempt.sessionId)
+      .then((response) => { if (active) { setDetail(response.attempt); setDetailError('') } })
+      .catch((error) => { if (active) setDetailError(error.message || 'Could not load attempt details.') })
+    load()
+    const timer = setInterval(() => {
+      if (normalizeStatus(attempt.status) === 'in-progress' || normalizeStatus(attempt.status) === 'locked') load()
+    }, 10000)
+    return () => { active = false; clearInterval(timer) }
+  }, [adminToken, attempt.sessionId, attempt.status])
 
   const reviewedAttempt = detail || attempt
+  const status = normalizeStatus(reviewedAttempt.status)
   const answerByQuestion = new Map((reviewedAttempt.submittedAnswers || []).map((answer) => [answer.questionId, answer]))
   const questions = reviewedAttempt.exam?.questions || []
+  const evidence = useMemo(() => [...(reviewedAttempt.evidence || [])].sort((a, b) => new Date(b.capturedAt) - new Date(a.capturedAt)), [reviewedAttempt.evidence])
+  const displayedEvidence = useMemo(() => evidence.slice(0, evidenceLimit), [evidence, evidenceLimit])
+  const cameraEvidence = useMemo(() => displayedEvidence.filter((item) => item.kind === 'CAMERA'), [displayedEvidence])
+  const screenEvidence = useMemo(() => displayedEvidence.filter((item) => item.kind === 'SCREEN'), [displayedEvidence])
+  const handleImageError = (id) => {
+    setEvidenceErrors((current) => ({ ...current, [id]: 'Image could not be displayed.' }))
+  }
+
   useEffect(() => {
-    if (!adminToken || !reviewedAttempt.evidence?.length) return undefined
+    if (!adminToken || displayedEvidence.length === 0) return undefined
     let active = true
     const urls = {}
-    Promise.all(reviewedAttempt.evidence.map(async (evidence) => {
+    Promise.all(displayedEvidence.map(async (item) => {
       try {
-        const blob = await api.admin.fetchEvidence(adminToken, evidence.id)
-        urls[evidence.id] = URL.createObjectURL(blob)
-      } catch {
-        // The timeline remains useful if an individual capture is unavailable.
+        const blob = await api.admin.fetchEvidence(adminToken, item.id)
+        const url = URL.createObjectURL(blob)
+        if (active) urls[item.id] = url
+        else URL.revokeObjectURL(url)
+      } catch (error) {
+        if (active) setEvidenceErrors((current) => ({ ...current, [item.id]: error.message || 'Image unavailable.' }))
       }
     })).then(() => { if (active) setEvidenceUrls(urls) })
     return () => {
       active = false
       Object.values(urls).forEach((url) => URL.revokeObjectURL(url))
     }
-  }, [adminToken, reviewedAttempt.evidence])
+  }, [adminToken, displayedEvidence])
 
-  const remaining = attemptRemaining(attempt, serverOffset, now)
+  const remaining = attemptRemaining({ ...reviewedAttempt, status }, serverOffset, now)
   const extensionError = validateExtension(minutes)
-  const open = attempt.status !== 'submitted'
-  const events = [...(attempt.events || [])].reverse().filter((event) => severity === 'all' || event.severity === severity)
+  const open = status !== 'submitted'
 
   async function run() {
     setBusy(true)
@@ -111,17 +153,18 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
 
   return (
     <aside className="detail" aria-labelledby="detail-title">
+      {detailError && <p className="subtle" role="alert">{detailError}</p>}
       <header className="detail-head">
         <div>
           <h2 id="detail-title">{attempt.name}</h2>
           <p className="subtle">{attempt.userId}</p>
         </div>
-        <Badge tone={STATUS_TONE[attempt.status]} dot>{STATUS_LABEL[attempt.status]}</Badge>
+        <Badge tone={STATUS_TONE[status]} dot>{STATUS_LABEL[status] || status}</Badge>
         <Button variant="ghost" size="sm" icon="x" aria-label="Close details" onClick={onClose} />
       </header>
 
       <dl className="detail-facts">
-        <div><dt>Status</dt><dd className="num">{attempt.status}</dd></div>
+        <div><dt>Status</dt><dd className="num">{status}</dd></div>
         <div><dt>Time left</dt><dd className="num">{remaining === null ? '—' : formatDuration(remaining)}</dd></div>
         <div><dt>Total score</dt><dd className="num" style={{ fontWeight: 700, color: 'var(--accent)' }}>{attempt.totalScore ?? attempt.correct ?? 0}</dd></div>
         <div><dt>Started</dt><dd className="num">{time(attempt.startedAt)}</dd></div>
@@ -135,7 +178,7 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
 
       {open && (
         <div className="detail-actions">
-          {attempt.status === 'locked' && (
+          {status === 'locked' && (
             <Button icon="lock" onClick={() => setConfirm('unlock')}>Unlock attempt</Button>
           )}
           <form className="extend-form" onSubmit={(event) => { event.preventDefault(); if (!extensionError) setConfirm('extend') }}>
@@ -214,68 +257,30 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
         </section>
       )}
 
-      {reviewedAttempt.evidence && reviewedAttempt.evidence.length > 0 && (
-        <section className="evidence-section card" style={{ padding: '16px' }}>
-          <h3 style={{ fontSize: 'var(--text-sm)', marginBottom: '8px' }}>
-            Proctoring Evidence ({attempt.evidence.length} captures)
-          </h3>
-          <div className="evidence-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px' }}>
-            {reviewedAttempt.evidence.map((ev) => (
-              <button
-                key={ev.id}
-                type="button"
-                className="evidence-thumb-btn"
-                style={{ border: '1px solid var(--border)', borderRadius: '4px', overflow: 'hidden', background: '#000', cursor: 'pointer', padding: 0 }}
-                onClick={() => setPreviewEvidence(ev)}>
-                <img
-                  src={evidenceUrls[ev.id]}
-                  alt={`${ev.kind} capture`}
-                  style={{ width: '100%', height: '60px', objectFit: 'cover' }}
-                  onError={(e) => { e.currentTarget.style.display = 'none' }}
-                />
-                <span style={{ fontSize: '10px', display: 'block', color: 'var(--text-muted)', textAlign: 'center', padding: '2px' }}>
-                  {ev.kind}
-                </span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
+      <section className="evidence-section card" style={{ padding: '16px' }}>
+        <EvidenceGroup
+          title="Camera Photos"
+          items={cameraEvidence}
+          total={evidence.filter((item) => item.kind === 'CAMERA').length}
+          urls={evidenceUrls}
+          errors={evidenceErrors}
+          onPreview={setPreviewEvidence}
+          onImageError={handleImageError}
+          onLoadEarlier={() => setEvidenceLimit((current) => current + 24)}
+        />
+        <EvidenceGroup
+          title="Screen Screenshots"
+          items={screenEvidence}
+          total={evidence.filter((item) => item.kind === 'SCREEN').length}
+          urls={evidenceUrls}
+          errors={evidenceErrors}
+          onPreview={setPreviewEvidence}
+          onImageError={handleImageError}
+          onLoadEarlier={() => setEvidenceLimit((current) => current + 24)}
+        />
+      </section>
 
       <PracticalReview attempt={attempt} instructorKey={instructorKey} />
-
-      <section className="activity">
-        <div className="activity-head">
-          <h3>Activity Timeline</h3>
-          <div className="segmented" role="group" aria-label="Filter by severity">
-            {['all', 'critical', 'warning', 'info'].map((value) => (
-              <button key={value} type="button" aria-pressed={severity === value} onClick={() => setSeverity(value)}>
-                {value[0].toUpperCase() + value.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-        {events.length === 0 ? <p className="subtle">No {severity === 'all' ? '' : severity} events recorded.</p> : (
-          <ol className="activity-list">
-            {events.map((event) => {
-              const hint = evidenceHint(event, attempt.sessionId)
-              return (
-                <li key={event.id || event.seq} className={`sev-${event.severity || 'info'}`}>
-                  <time className="num" title={`Received ${time(event.receivedAt)}`}>{time(event.clientAt || event.receivedAt)}</time>
-                  <div>
-                    <div className="row">
-                      <strong>{EVENT_LABEL[event.type] || event.type}</strong>
-                      {event.severity && event.severity !== 'info' && <Badge tone={SEVERITY_TONE[event.severity]}>{event.severity}</Badge>}
-                    </div>
-                    {event.detail && <p className="subtle">{event.detail}</p>}
-                    {hint && <p className="evidence-ref">{hint}, around this time</p>}
-                  </div>
-                </li>
-              )
-            })}
-          </ol>
-        )}
-      </section>
 
       <Modal open={confirm !== null} onClose={() => !busy && setConfirm(null)}
         title={confirm === 'unlock' ? 'Unlock this attempt?' : `Add ${minutes} minutes?`}

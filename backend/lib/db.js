@@ -58,6 +58,14 @@ const memoryStore = {
   auditLogs: [],
 };
 
+const evidenceMetadataSelect = {
+  id: true,
+  kind: true,
+  filename: true,
+  byteSize: true,
+  capturedAt: true,
+};
+
 // Seed initial default questions if available
 function loadDefaultQuestions() {
   const jsonPath = process.env.ATHENA_QUESTIONS_PATH || path.join(__dirname, "../data/questions.json");
@@ -501,7 +509,7 @@ const db = {
             exam: { include: { questions: { select: { id: true, prompt: true, marks: true } } } },
             submittedAnswers: true,
             activityEvents: { orderBy: { seq: "asc" } },
-            evidence: true,
+            evidence: { select: evidenceMetadataSelect, orderBy: { capturedAt: "desc" } },
             extensions: true,
           },
         });
@@ -519,7 +527,10 @@ const db = {
       const activityEvents = memoryStore.activityEvents
         .filter((ae) => ae.attemptId === attempt.id)
         .sort((a, b) => a.seq - b.seq);
-      const evidence = memoryStore.evidence.filter((ev) => ev.attemptId === attempt.id);
+      const evidence = memoryStore.evidence
+        .filter((ev) => ev.attemptId === attempt.id)
+        .map(({ id, kind, filename, byteSize, capturedAt }) => ({ id, kind, filename, byteSize, capturedAt }))
+        .sort((a, b) => new Date(b.capturedAt) - new Date(a.capturedAt));
       const extensions = memoryStore.extensions.filter((ex) => ex.attemptId === attempt.id);
       return {
         ...attempt,
@@ -580,7 +591,6 @@ const db = {
           include: {
             user: { select: { id: true, username: true, name: true } },
             activityEvents: true,
-            evidence: true,
             extensions: true,
             submittedAnswers: true,
           },
@@ -592,14 +602,12 @@ const db = {
         .map((att) => {
           const user = memoryStore.users.find((u) => u.id === att.userId);
           const activityEvents = memoryStore.activityEvents.filter((ae) => ae.attemptId === att.id);
-          const evidence = memoryStore.evidence.filter((ev) => ev.attemptId === att.id);
           const extensions = memoryStore.extensions.filter((ex) => ex.attemptId === att.id);
           const submittedAnswers = memoryStore.submittedAnswers.filter((sa) => sa.attemptId === att.id);
           return {
             ...att,
             user: user ? { id: user.id, username: user.username, name: user.name } : null,
             activityEvents,
-            evidence,
             extensions,
             submittedAnswers,
           };
@@ -614,7 +622,6 @@ const db = {
             user: { select: { id: true, username: true, name: true } },
             exam: { select: { id: true, title: true } },
             activityEvents: true,
-            evidence: true,
             extensions: true,
             submittedAnswers: true,
           },
@@ -626,7 +633,6 @@ const db = {
           const user = memoryStore.users.find((u) => u.id === att.userId);
           const exam = memoryStore.exams.find((e) => e.id === att.examId);
           const activityEvents = memoryStore.activityEvents.filter((ae) => ae.attemptId === att.id);
-          const evidence = memoryStore.evidence.filter((ev) => ev.attemptId === att.id);
           const extensions = memoryStore.extensions.filter((ex) => ex.attemptId === att.id);
           const submittedAnswers = memoryStore.submittedAnswers.filter((sa) => sa.attemptId === att.id);
           return {
@@ -634,7 +640,6 @@ const db = {
             user: user ? { id: user.id, username: user.username, name: user.name } : null,
             exam: exam ? { id: exam.id, title: exam.title } : null,
             activityEvents,
-            evidence,
             extensions,
             submittedAnswers,
           };
@@ -855,6 +860,17 @@ const db = {
       const record = { id: crypto.randomUUID(), ...recordData };
       memoryStore.evidence.push(record);
       return record;
+    },
+
+    async findEvidenceById(id) {
+      if (prismaClient) {
+        return prismaClient.evidence.findUnique({
+          where: { id },
+          select: { id: true, storagePath: true, data: true },
+        });
+      }
+      const record = memoryStore.evidence.find((item) => item.id === id);
+      return record ? { id: record.id, storagePath: record.storagePath, data: record.data || null } : null;
     },
 
     async updateGrade(attemptId, { autoScore, manualScore, totalScore, isReviewed = true, reviewNotes = "" }) {

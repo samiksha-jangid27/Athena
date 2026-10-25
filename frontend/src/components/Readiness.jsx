@@ -70,7 +70,7 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
     durationMinutes: selectedExam.durationMinutes,
     questionCount: selectedExam.questionCount || selectedExam._count?.questions || 0,
     lockOnFullscreenExit: true,
-    snapshotIntervalSeconds: 30,
+    snapshotIntervalSeconds: 10,
   } : serviceInfo
 
   const [step, setStep] = useState(0)
@@ -188,7 +188,7 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
             <li>The countdown is synchronized with the exam server. When it reaches zero, your responses are submitted automatically.</li>
             <li>Your answers save automatically. If Athena closes or the connection drops, reopen the app to continue where you left off.</li>
             <li><strong>Leaving fullscreen immediately locks answering</strong> until an instructor reviews the event and unlocks your attempt.</li>
-            <li>Athena periodically takes camera photos and desktop screenshots during the exam to verify integrity. Evidence is stored locally on this machine.</li>
+            <li>Athena takes camera photos and desktop screenshots every 10 seconds during the exam. They are uploaded securely to the hosted exam backend for instructor review.</li>
             <li>You can flag questions to review them later before submitting. Flags do not affect your score.</li>
           </ul>
           {online === false && <Callout tone="danger" role="alert">The exam service is offline. Start the backend, or ask your instructor. This page checks again every few seconds.</Callout>}
@@ -254,7 +254,7 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
                     : 'Athena could not capture the screen. Close screen-sharing apps and check again.')
                   : screen.state === 'unsupported'
                     ? 'You are using the browser preview. Screenshots only work in the Athena desktop app.'
-                    : 'Athena saves a screenshot about every 30 seconds during the exam.'}
+                    : 'Athena uploads an optimized desktop screenshot about every 10 seconds during the exam.'}
               </CheckRow>
               <CheckRow icon="monitor" title="Other apps"
                 tone={apps.state === 'clear' ? 'success' : apps.state === 'found' || apps.state === 'error' ? 'danger' : apps.state === 'unsupported' ? 'warning' : 'neutral'}
@@ -298,8 +298,8 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
             <div>
               <h2 className="section-title">During the exam, Athena records</h2>
               <ul className="rule-list">
-                <li>A camera photo about every 30 seconds</li>
-                <li>A screenshot about every 30 seconds (desktop app)</li>
+                <li>A camera photo about every 10 seconds</li>
+                <li>A screenshot about every 10 seconds (desktop app)</li>
                 <li>Timestamped events: leaving fullscreen, switching windows, camera or screen-capture interruptions, connection loss</li>
               </ul>
             </div>
@@ -312,7 +312,7 @@ export default function Readiness({ camera, onBegin, athena, student, selectedEx
               </ul>
             </div>
           </div>
-          <p className="subtle">Photos and screenshots are stored on this device in Athena’s data folder. A visible indicator shows while monitoring is active.</p>
+          <p className="subtle">Photos and screenshots are uploaded securely to the hosted Athena backend for instructor review. A visible indicator shows while monitoring is active.</p>
           <label className="consent-check">
             <input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} />
             <span>I understand the exam rules and agree to this monitoring for the duration of the exam.</span>

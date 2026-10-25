@@ -11,7 +11,7 @@ import { scanBackgroundApps } from "./background-apps.js";
 
 const DEV_URL = "http://localhost:5173";
 const BACKEND_URL = "http://127.0.0.1:3000/";
-const SNAPSHOT_INTERVAL_MS = 30000;
+const SNAPSHOT_INTERVAL_MS = 10000;
 
 // Same name and data folder in dev and packaged builds (dev would
 // otherwise use "Electron").
@@ -23,6 +23,7 @@ let backendProcess = null;
 let snapshotTimer = null;
 let lastScreenOk = null;
 let closeAfterSubmission = false;
+let screenCaptureInFlight = false;
 
 // ---------------- Backend ----------------
 
@@ -115,16 +116,18 @@ function sendToRenderer(channel, value) {
 }
 
 async function captureScreen() {
+  if (screenCaptureInFlight) return;
+  screenCaptureInFlight = true;
   let ok = false;
   try {
     const sources = await desktopCapturer.getSources({
       types: ["screen"],
-      thumbnailSize: { width: 1280, height: 720 },
+      thumbnailSize: { width: 960, height: 540 },
     });
     const thumbnail = sources[0]?.thumbnail;
     // macOS returns an empty image when Screen Recording permission is missing.
     if (thumbnail && !thumbnail.isEmpty()) {
-      const jpegBuffer = thumbnail.toJPEG(70);
+      const jpegBuffer = thumbnail.toJPEG(58);
       const filename = `${Date.now()}-${crypto.randomBytes(4).toString("hex")}.jpg`;
       fs.writeFileSync(path.join(evidenceDir("screen"), filename), jpegBuffer);
       sendToRenderer("proctoring:screen-snap-captured", jpegBuffer.toString("base64"));
@@ -132,6 +135,8 @@ async function captureScreen() {
     }
   } catch (error) {
     console.error("Screen capture failed:", error);
+  } finally {
+    screenCaptureInFlight = false;
   }
   if (ok !== lastScreenOk) {
     lastScreenOk = ok;

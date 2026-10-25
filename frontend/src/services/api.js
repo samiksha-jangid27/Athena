@@ -3,6 +3,12 @@ import { HttpError } from '../lib/exam.js'
 const STORED_URL_KEY = 'athena.api_url'
 
 export function getApiUrl() {
+  if (import.meta.env.PROD) {
+    if (typeof window !== 'undefined' && window.localStorage.getItem(STORED_URL_KEY)) {
+      window.localStorage.removeItem(STORED_URL_KEY)
+    }
+    return 'https://athena-backend-2a0l.onrender.com'
+  }
   if (typeof window !== 'undefined') {
     const stored = window.localStorage.getItem(STORED_URL_KEY)
     if (stored && stored.trim()) return stored.trim()
@@ -11,9 +17,6 @@ export function getApiUrl() {
     return import.meta.env.VITE_ATHENA_API_URL
   }
   // Never default to localhost in a production build!
-  if (import.meta.env.PROD) {
-    return 'https://athena-exam-backend.onrender.com'
-  }
   return 'http://127.0.0.1:3000'
 }
 
@@ -92,7 +95,7 @@ export const api = {
     uploadEvidence: (attemptToken, kind, base64) =>
       request('/api/student/attempt/evidence', { method: 'POST', token: attemptToken, body: { kind, base64 }, timeoutMs: 25000 }),
     submit: (attemptToken, answers, flags) =>
-      request('/api/student/attempt/submit', { method: 'POST', token: attemptToken, body: { answers, flags } }),
+      request('/api/student/attempt/submit', { method: 'POST', token: attemptToken, body: { answers, flags }, timeoutMs: 30000 }),
   },
 
   // ---------------- Admin API ----------------

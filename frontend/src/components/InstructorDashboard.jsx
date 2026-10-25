@@ -6,9 +6,9 @@ import {
   STATUS_TONE,
   attemptRemaining,
   countByStatus,
-  criticalCount,
   filterAttempts,
   lastActivity,
+  normalizeStatus,
   sortAttempts,
 } from '../lib/instructor.js'
 import Badge from './ui/Badge.jsx'
@@ -95,7 +95,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
       } else {
         list = await api.listAttempts('test')
       }
-      setAttempts(list || [])
+      setAttempts((list || []).map((item) => ({ ...item, status: normalizeStatus(item.status) })))
       setAttemptsError(null)
     } catch (err) {
       setAttemptsError(err.message || 'Failed to load attempts')
@@ -138,7 +138,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
       try {
         const list = adminToken ? await api.admin.listAttempts(adminToken) : await api.listAttempts('test')
         if (active) {
-          setAttempts(list || [])
+          setAttempts((list || []).map((item) => ({ ...item, status: normalizeStatus(item.status) })))
           setAttemptsError(null)
           setLoadingAttempts(false)
         }
@@ -420,7 +420,6 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
               <span>Sort:</span>
               <select value={sort} onChange={(e) => setSort(e.target.value)}>
                 <option value="activity">Latest activity</option>
-                <option value="critical">Critical events</option>
                 <option value="deadline">Deadline</option>
                 <option value="name">Student name</option>
               </select>
@@ -447,7 +446,6 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                       <th>Status</th>
                       <th>Time Remaining</th>
                       <th>Answered</th>
-                      <th>Critical Alerts</th>
                       <th>Score</th>
                       <th>Last Sync</th>
                     </tr>
@@ -455,7 +453,6 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                   <tbody>
                     {rows.map((att) => {
                       const remaining = attemptRemaining(att, 0, now)
-                      const critical = criticalCount(att)
                       const isSelected = att.sessionId === selectedId
                       return (
                         <tr
@@ -480,9 +477,6 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                             {remaining === null ? '—' : formatDuration(remaining)}
                           </td>
                           <td className="num">{att.attempted ?? (att.answers ? Object.keys(att.answers).length : 0)}</td>
-                          <td className="num">
-                            {critical ? <Badge tone="danger">{critical}</Badge> : '0'}
-                          </td>
                           <td className="num" style={{ fontWeight: 650 }}>
                             {att.totalScore ?? att.correct ?? '—'}
                           </td>

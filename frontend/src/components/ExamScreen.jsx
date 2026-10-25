@@ -28,6 +28,8 @@ export default function ExamScreen({ exam, camera, athena }) {
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement))
   const [activeDisallowed, setActiveDisallowed] = useState([])
   const videoRef = useRef(null)
+  const cameraUploadInFlight = useRef(false)
+  const screenUploadInFlight = useRef(false)
   const { logEvent, submit } = exam
   const snapshot = camera.snapshot
 
@@ -94,18 +96,24 @@ export default function ExamScreen({ exam, camera, athena }) {
 
   // Desktop-only evidence capture and active background application monitoring.
   const sessionId = exam.attempt?.sessionId
+  const attemptStatus = exam.attempt?.status
   useEffect(() => {
-    if (!athena) return undefined
+    if (!athena || ['submitted', 'expired'].includes(attemptStatus)) return undefined
     const offScreen = athena.onScreenCaptureStatus((ok) => {
       setScreenOk(ok)
       logEvent(ok ? 'screen-capture-restored' : 'screen-capture-failed')
     })
     const offScreenSnap = athena.onScreenSnapshotCaptured?.((base64) => {
-      if (exam.token && base64) {
-        api.student.uploadEvidence(exam.token, 'screen', base64).catch(() => {})
+      if (exam.token && base64 && !screenUploadInFlight.current) {
+        screenUploadInFlight.current = true
+        api.student.uploadEvidence(exam.token, 'screen', base64)
+          .catch(() => {})
+          .finally(() => { screenUploadInFlight.current = false })
       }
     })
     const offCamera = athena.onCameraSnapshotRequest(async () => {
+      if (cameraUploadInFlight.current) return
+      cameraUploadInFlight.current = true
       const bytes = await snapshot().catch(() => null)
       if (bytes) {
         athena.saveCameraSnapshot(bytes, sessionId).catch(() => {})
@@ -114,10 +122,20 @@ export default function ExamScreen({ exam, camera, athena }) {
           const reader = new FileReader()
           reader.onloadend = () => {
             const base64 = reader.result
-            if (base64) api.student.uploadEvidence(exam.token, 'camera', base64).catch(() => {})
+            if (base64) {
+              api.student.uploadEvidence(exam.token, 'camera', base64)
+                .catch(() => {})
+                .finally(() => { cameraUploadInFlight.current = false })
+            } else {
+              cameraUploadInFlight.current = false
+            }
           }
           reader.readAsDataURL(blob)
+        } else {
+          cameraUploadInFlight.current = false
         }
+      } else {
+        cameraUploadInFlight.current = false
       }
       checkRunningApps()
     })
@@ -128,7 +146,7 @@ export default function ExamScreen({ exam, camera, athena }) {
       offCamera()
       athena.stopProctoring()
     }
-  }, [athena, sessionId, logEvent, snapshot, checkRunningApps, exam.token])
+  }, [athena, sessionId, attemptStatus, logEvent, snapshot, checkRunningApps, exam.token])
 
   useEffect(() => {
     if (!athena?.onCloseRequest) return undefined

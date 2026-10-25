@@ -41,12 +41,15 @@ export function useCamera() {
     video.srcObject = streamRef.current
     await video.play()
     const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth || 640
-    canvas.height = video.videoHeight || 480
+    const sourceWidth = video.videoWidth || 640
+    const sourceHeight = video.videoHeight || 480
+    const scale = Math.min(1, 960 / sourceWidth, 540 / sourceHeight)
+    canvas.width = Math.round(sourceWidth * scale)
+    canvas.height = Math.round(sourceHeight * scale)
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height)
     video.pause()
     video.srcObject = null
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.7))
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.58))
     return blob ? new Uint8Array(await blob.arrayBuffer()) : null
   }, [])
 

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { countByStatus, filterAttempts, sortAttempts, attemptRemaining, criticalCount, validateExtension } from './instructor.js'
+import { countByStatus, filterAttempts, sortAttempts, attemptRemaining, validateExtension } from './instructor.js'
 
 const attempts = [
   { sessionId: 'a', name: 'Asha Rao', userId: 'CS-1', status: 'locked', startedAt: '2026-01-01T10:00:00Z', deadline: '2026-01-01T10:10:00Z',
@@ -21,12 +21,10 @@ test('filterAttempts matches name or ID and status', () => {
   assert.deepEqual(filterAttempts(attempts, { status: 'locked' }).map((a) => a.sessionId), ['a'])
 })
 
-test('sortAttempts orders by activity, deadline, name and critical events', () => {
+test('sortAttempts orders by activity, deadline and name', () => {
   assert.deepEqual(sortAttempts(attempts, 'activity').map((a) => a.sessionId), ['b', 'a', 'c'])
   assert.deepEqual(sortAttempts(attempts, 'deadline').map((a) => a.sessionId), ['b', 'a', 'c'])
   assert.deepEqual(sortAttempts(attempts, 'name').map((a) => a.sessionId), ['a', 'b', 'c'])
-  assert.equal(sortAttempts(attempts, 'critical')[0].sessionId, 'a')
-  assert.equal(criticalCount(attempts[0]), 1)
 })
 
 test('attemptRemaining is null for closed attempts and uses the server offset', () => {

@@ -465,7 +465,7 @@ function createApp(config = {}) {
         sessionId: att.sessionId,
         userId: att.user?.username || att.userId,
         name: att.name,
-        status: att.status.toLowerCase(),
+        status: att.status.toLowerCase().replace(/_/g, "-"),
         startedAt: att.startedAt,
         deadline: att.deadline,
         submittedAt: att.submittedAt,
@@ -619,16 +619,7 @@ function createApp(config = {}) {
   // Admin: View Authenticated Proctoring Evidence
   app.get("/api/admin/evidence/:evidenceId", ...requireAdmin, async (req, res) => {
     try {
-      let record = null;
-      if (db.isPostgres) {
-        // Prisma lookup
-        const { PrismaClient } = require("@prisma/client");
-        const pc = new PrismaClient();
-        record = await pc.evidence.findUnique({ where: { id: req.params.evidenceId } });
-      } else {
-        const { memoryStore } = require("./lib/db");
-        record = memoryStore.evidence.find((e) => e.id === req.params.evidenceId);
-      }
+      const record = await db.attempts.findEvidenceById(req.params.evidenceId);
       if (!record) return sendError(res, 404, "Evidence record not found");
       if (record.data) {
         res.setHeader("Content-Type", "image/jpeg");
