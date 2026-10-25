@@ -95,7 +95,7 @@ function createApp(config = {}) {
         }
       },
       credentials: true,
-      allowedHeaders: ["Content-Type", "Authorization", "x-athena-bootstrap-secret"],
+      allowedHeaders: ["Content-Type", "Authorization", "x-athena-bootstrap-secret", "x-athena-start-id"],
     })
   );
 
@@ -481,24 +481,37 @@ function createApp(config = {}) {
   app.get("/api/admin/attempts", ...requireAdmin, async (req, res) => {
     try {
       const attempts = await db.attempts.listAll();
-      const list = attempts.map((att) => ({
-        sessionId: att.sessionId,
-        userId: att.user?.username || att.userId,
-        name: att.name,
-        status: att.status.toLowerCase().replace(/_/g, "-"),
-        startedAt: att.startedAt,
-        deadline: att.deadline,
-        submittedAt: att.submittedAt,
-        lastSavedAt: att.lastSavedAt,
-        eventCount: (att.activityEvents || []).length,
-        events: att.activityEvents || [],
-        extensions: att.extensions || [],
-        autoScore: att.autoScore,
-        manualScore: att.manualScore,
-        totalScore: att.totalScore,
-        isReviewed: att.isReviewed,
-        serverTime: new Date().toISOString(),
-      }));
+      const now = Date.now();
+      const list = [];
+      for (const att of attempts) {
+        // Bug 11: Finalize stale in-progress attempts past deadline
+        let status = att.status;
+        if ((status === "IN_PROGRESS" || status === "LOCKED") && now > new Date(att.deadline).getTime() + 5000) {
+          await db.attempts.updateStatus(att.id, "EXPIRED", new Date());
+          status = "EXPIRED";
+        }
+        list.push({
+          sessionId: att.sessionId,
+          examId: att.examId,
+          examTitle: att.exam?.title || null,
+          userId: att.user?.username || att.userId,
+          name: att.name,
+          status: normalizeStatus(status),
+          startedAt: att.startedAt,
+          deadline: att.deadline,
+          submittedAt: att.submittedAt,
+          lastSavedAt: att.lastSavedAt,
+          eventCount: (att.activityEvents || []).length,
+          events: att.activityEvents || [],
+          extensions: att.extensions || [],
+          autoScore: att.autoScore,
+          manualScore: att.manualScore,
+          totalScore: att.totalScore,
+          maxScore: att.maxScore || null,
+          isReviewed: att.isReviewed,
+          serverTime: new Date().toISOString(),
+        });
+      }
       res.json(list);
     } catch (err) {
       sendError(res, 500, err.message);
@@ -659,25 +672,34 @@ function createApp(config = {}) {
 
   // ---------------- Student Examination Experience ----------------
 
-  // Student: List published exams
+  // Student: List published exams (Bug 6: include per-exam attempt status/score)
   app.get("/api/student/exams", ...requireStudent, async (req, res) => {
     try {
       const exams = await db.exams.listPublished();
-      res.json({
-        exams: exams.map((e) => ({
+      const examList = [];
+      for (const e of exams) {
+        const myAttempt = await db.attempts.findAnyByUserAndExam(req.user.id, e.id);
+        const info = {
           id: e.id,
           title: e.title,
           description: e.description,
           durationMinutes: e.durationMinutes,
           questionCount: e._count?.questions || 0,
-        })),
-      });
+        };
+        if (myAttempt) {
+          info.attemptStatus = normalizeStatus(myAttempt.status);
+          info.attemptScore = myAttempt.totalScore || 0;
+          info.attemptMaxScore = myAttempt.maxScore || null;
+        }
+        examList.push(info);
+      }
+      res.json({ exams: examList });
     } catch (err) {
       sendError(res, 500, err.message);
     }
   });
 
-  // Student: Start exam attempt
+  // Student: Start exam attempt (Bug 6: enforce one attempt per student per exam)
   app.post("/api/student/exams/:id/start", ...requireStudent, async (req, res) => {
     try {
       const exam = await db.exams.findById(req.params.id);
@@ -695,9 +717,65 @@ function createApp(config = {}) {
       if (existingByRequest && existingByRequest.userId !== req.user.id) {
         return sendError(res, 403, "Attempt does not belong to this student");
       }
+
+      // Bug 6: Check for ANY existing attempt (including SUBMITTED/EXPIRED)
+      const anyExisting = await db.attempts.findAnyByUserAndExam(req.user.id, exam.id);
+      
+      // If there's a submitted attempt, reject - exam already completed
+      if (anyExisting && anyExisting.status === "SUBMITTED") {
+        return sendError(res, 409, "You have already completed this exam.", {
+          attemptStatus: "submitted",
+          score: anyExisting.totalScore,
+          maxScore: anyExisting.maxScore || null,
+        });
+      }
+
+      // Handle stale expired attempts: finalize them and reject
+      if (anyExisting && anyExisting.status === "EXPIRED") {
+        // Expired attempt: grade it and mark submitted if not already scored
+        if (anyExisting.totalScore === 0 && !anyExisting.submittedAt) {
+          const questions = await db.questions.listByExam(exam.id, { includeAnswers: true });
+          const saved = attemptAnswers(anyExisting);
+          const gradingResult = gradeAttempt(questions, saved.answers);
+          const submittedAt = new Date();
+          await db.attempts.updateStatus(anyExisting.id, "SUBMITTED", submittedAt);
+          await db.attempts.updateGrade(anyExisting.id, {
+            autoScore: gradingResult.autoScore,
+            manualScore: 0,
+            totalScore: gradingResult.autoScore,
+            maxScore: gradingResult.maxPossible,
+            isReviewed: !gradingResult.hasManualPending,
+          });
+        }
+        return sendError(res, 409, "Your attempt for this exam has expired and been finalized.", {
+          attemptStatus: "submitted",
+        });
+      }
+
       const existing = await db.attempts.findActiveByUserAndExam(req.user.id, exam.id);
       const activeAttempt = existingByRequest || existing;
       if (activeAttempt) {
+        // Check if the active attempt is past its deadline
+        const now = Date.now();
+        if (now > new Date(activeAttempt.deadline).getTime() + 5000) {
+          // Finalize the expired attempt
+          const questions = await db.questions.listByExam(exam.id, { includeAnswers: true });
+          const saved = attemptAnswers(activeAttempt);
+          const gradingResult = gradeAttempt(questions, saved.answers);
+          const submittedAt = new Date();
+          await db.attempts.updateStatus(activeAttempt.id, "SUBMITTED", submittedAt);
+          await db.attempts.updateGrade(activeAttempt.id, {
+            autoScore: gradingResult.autoScore,
+            manualScore: 0,
+            totalScore: gradingResult.autoScore,
+            maxScore: gradingResult.maxPossible,
+            isReviewed: !gradingResult.hasManualPending,
+          });
+          return sendError(res, 409, "Your attempt for this exam has expired and been finalized.", {
+            attemptStatus: "submitted",
+          });
+        }
+
         const questions = await db.questions.listByExam(exam.id);
         const token = attemptTokenForSession(activeAttempt.sessionId);
         if (hashToken(token) !== activeAttempt.tokenHash) {
@@ -710,7 +788,7 @@ function createApp(config = {}) {
           sessionId: activeAttempt.sessionId,
           attempt: {
             sessionId: activeAttempt.sessionId,
-            status: activeAttempt.status.toLowerCase().replace(/_/g, "-"),
+            status: normalizeStatus(activeAttempt.status),
             deadline: activeAttempt.deadline,
             serverTime: new Date().toISOString(),
             ...saved,
@@ -761,6 +839,7 @@ function createApp(config = {}) {
   });
 
   // Student: Heartbeat / Active attempt polling
+  // Bug 4 + 8: Normalize status, include result for submitted attempts
   app.get("/api/student/attempt", async (req, res) => {
     const authHeader = req.get("authorization") || "";
     const rawToken = authHeader.replace(/^Bearer\s+/i, "").trim();
@@ -789,18 +868,35 @@ function createApp(config = {}) {
         if (sa.isFlagged) flagsList.push(sa.questionId);
       }
 
-      res.json({
+      const responseData = {
         exam: { id: attempt.examId, title: attempt.exam?.title },
         attempt: {
           sessionId: attempt.sessionId,
-          status: attempt.status.toLowerCase(),
+          status: normalizeStatus(attempt.status),
           deadline: attempt.deadline,
           serverTime: new Date().toISOString(),
+          submittedAt: attempt.submittedAt || null,
           answers: answersMap,
           flags: flagsList,
         },
         questions: questions.map(questionForStudent),
-      });
+      };
+
+      // Bug 8: Include stored result for submitted attempts
+      if (attempt.status === "SUBMITTED") {
+        const answered = Object.keys(answersMap).length;
+        responseData.result = {
+          score: attempt.totalScore,
+          maxScore: attempt.maxScore || null,
+          attempted: answered,
+          correct: attempt.autoScore, // approximation; exact count stored in graded items
+          hasManualPending: !attempt.isReviewed,
+          submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
+          status: "submitted",
+        };
+      }
+
+      res.json(responseData);
     } catch (err) {
       sendError(res, 500, err.message);
     }
@@ -817,8 +913,8 @@ function createApp(config = {}) {
 
       // Reject save if locked or closed
       if (attempt.status !== "IN_PROGRESS") {
-        return sendError(res, 409, `Attempt is ${attempt.status.toLowerCase()}`, {
-          attempt: { status: attempt.status.toLowerCase() },
+        return sendError(res, 409, `Attempt is ${normalizeStatus(attempt.status)}`, {
+          attempt: { status: normalizeStatus(attempt.status) },
         });
       }
 
@@ -853,7 +949,7 @@ function createApp(config = {}) {
       if (!attempt) return sendError(res, 401, "Invalid session token");
 
       if (attempt.status === "SUBMITTED" || attempt.status === "EXPIRED") {
-        return sendError(res, 409, `Attempt is ${attempt.status.toLowerCase()}`);
+        return sendError(res, 409, `Attempt is ${normalizeStatus(attempt.status)}`);
       }
 
       const { events } = req.body || {};
@@ -865,7 +961,7 @@ function createApp(config = {}) {
       res.json({
         attempt: {
           sessionId: attempt.sessionId,
-          status: refreshed.status.toLowerCase(),
+          status: normalizeStatus(refreshed.status),
         },
       });
     } catch (err) {
@@ -914,7 +1010,7 @@ function createApp(config = {}) {
     }
   });
 
-  // Student: Submit exam attempt
+  // Student: Submit exam attempt (Bug 7: atomic, idempotent, full result)
   app.post("/api/student/attempt/submit", async (req, res) => {
     const rawToken = (req.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
     if (!rawToken) return sendError(res, 401, "Attempt token required");
@@ -924,27 +1020,75 @@ function createApp(config = {}) {
       if (!attempt) return sendError(res, 401, "Invalid session token");
 
       if (attempt.status === "SUBMITTED") {
-        // Idempotent submit
+        // Bug 7: Idempotent submit returns full stored result
+        const savedAnswers = attemptAnswers(attempt);
+        const answered = Object.keys(savedAnswers.answers).length;
         return res.json({
-          attempt: { sessionId: attempt.sessionId, status: "submitted", submittedAt: attempt.submittedAt },
-          result: { score: attempt.totalScore, isReviewed: attempt.isReviewed },
+          attempt: {
+            sessionId: attempt.sessionId,
+            status: "submitted",
+            submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
+          },
+          result: {
+            score: attempt.totalScore,
+            maxScore: attempt.maxScore || null,
+            attempted: answered,
+            correct: attempt.autoScore,
+            hasManualPending: !attempt.isReviewed,
+            submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
+            status: "submitted",
+          },
         });
       }
 
-      const { answers = {}, flags = [] } = req.body || {};
-      if (attempt.status === "IN_PROGRESS") {
-        await db.attempts.saveAnswers(attempt.id, answers, flags);
+      // Bug 7: Only accept answers if still in-progress
+      if (attempt.status !== "IN_PROGRESS" && attempt.status !== "LOCKED" && attempt.status !== "EXPIRED") {
+        return sendError(res, 409, `Cannot submit: attempt is ${normalizeStatus(attempt.status)}`);
       }
 
+      const { answers = {}, flags = [] } = req.body || {};
+
+      // Bug 7: Save answers first, then grade from stored answers (atomic)
+      if (attempt.status === "IN_PROGRESS" || attempt.status === "LOCKED") {
+        await db.attempts.saveAnswers(attempt.id, answers, flags);
+      }
+      // For expired attempts, use the already-saved answers, don't trust new payload
+
+      // Re-read the stored answers to grade exactly what's persisted
+      const freshAttempt = await db.attempts.findByTokenHash(hashToken(rawToken));
+      // Double-check: if someone else already submitted while we were processing
+      if (freshAttempt.status === "SUBMITTED") {
+        const savedAnswers = attemptAnswers(freshAttempt);
+        const answered = Object.keys(savedAnswers.answers).length;
+        return res.json({
+          attempt: {
+            sessionId: freshAttempt.sessionId,
+            status: "submitted",
+            submittedAt: freshAttempt.submittedAt ? new Date(freshAttempt.submittedAt).toISOString() : null,
+          },
+          result: {
+            score: freshAttempt.totalScore,
+            maxScore: freshAttempt.maxScore || null,
+            attempted: answered,
+            correct: freshAttempt.autoScore,
+            hasManualPending: !freshAttempt.isReviewed,
+            submittedAt: freshAttempt.submittedAt ? new Date(freshAttempt.submittedAt).toISOString() : null,
+            status: "submitted",
+          },
+        });
+      }
+
+      const storedAnswers = attemptAnswers(freshAttempt);
       const questions = await db.questions.listByExam(attempt.examId, { includeAnswers: true });
-      const gradingResult = gradeAttempt(questions, answers);
+      const gradingResult = gradeAttempt(questions, storedAnswers.answers);
 
       const submittedAt = new Date();
-      await db.attempts.updateStatus(attempt.id, "SUBMITTED", submittedAt);
-      await db.attempts.updateGrade(attempt.id, {
+      await db.attempts.updateStatus(freshAttempt.id, "SUBMITTED", submittedAt);
+      await db.attempts.updateGrade(freshAttempt.id, {
         autoScore: gradingResult.autoScore,
         manualScore: 0,
         totalScore: gradingResult.autoScore,
+        maxScore: gradingResult.maxPossible,
         isReviewed: !gradingResult.hasManualPending,
       });
 
@@ -956,6 +1100,8 @@ function createApp(config = {}) {
         details: { score: gradingResult.autoScore, max: gradingResult.maxPossible },
       });
 
+      const answered = Object.keys(storedAnswers.answers).length;
+
       res.json({
         attempt: {
           sessionId: attempt.sessionId,
@@ -965,7 +1111,11 @@ function createApp(config = {}) {
         result: {
           score: gradingResult.autoScore,
           maxScore: gradingResult.maxPossible,
+          attempted: answered,
+          correct: gradingResult.gradedItems.filter((g) => g.isCorrect === true).length,
           hasManualPending: gradingResult.hasManualPending,
+          submittedAt: submittedAt.toISOString(),
+          status: "submitted",
         },
       });
     } catch (err) {
