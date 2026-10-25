@@ -85,7 +85,7 @@ test("Authentication: student account provisioning and student login", async () 
   assert.equal(forbiddenRes.status, 403);
 });
 
-test("Admin Exam Management: create, add multi-type questions, publish, student takes and submits exam", async () => {
+test("Admin Exam Management: create, add MCQ questions, publish, student takes and submits exam", async () => {
   // 1. Admin login
   const adminRes = await fetch(`${baseUrl}/api/auth/login`, {
     method: "POST",
@@ -112,7 +112,7 @@ test("Admin Exam Management: create, add multi-type questions, publish, student 
   assert.equal(examRes.status, 201);
   const { exam } = await examRes.json();
 
-  // 3. Add questions (MCQ, MSQ, TRUE_FALSE, SHORT_ANSWER)
+  // 3. Add questions (the active product is MCQ-only)
   const q1Res = await fetch(`${baseUrl}/api/admin/exams/${exam.id}/questions`, {
     method: "POST",
     headers: {
@@ -137,10 +137,10 @@ test("Admin Exam Management: create, add multi-type questions, publish, student 
       Authorization: `Bearer ${adminToken}`,
     },
     body: JSON.stringify({
-      type: "MSQ",
-      prompt: "Select recommended security settings",
-      options: ["contextIsolation: true", "sandbox: true", "nodeIntegration: true"],
-      correctAnswer: [0, 1],
+      type: "MCQ",
+      prompt: "Which webPreferences setting should be enabled?",
+      options: ["nodeIntegration: true", "contextIsolation: true", "webSecurity: false", "allowRunningInsecureContent: true"],
+      correctAnswer: 1,
       marks: 20,
     }),
   });
@@ -154,9 +154,10 @@ test("Admin Exam Management: create, add multi-type questions, publish, student 
       Authorization: `Bearer ${adminToken}`,
     },
     body: JSON.stringify({
-      type: "SHORT_ANSWER",
-      prompt: "What IPC method sends a request and awaits a promise response?",
-      correctAnswer: "ipcRenderer.invoke",
+      type: "MCQ",
+      prompt: "Which IPC method sends a request and awaits a promise response?",
+      options: ["ipcRenderer.send", "ipcRenderer.on", "ipcRenderer.invoke", "ipcRenderer.sendSync"],
+      correctAnswer: 2,
       marks: 20,
     }),
   });
@@ -208,8 +209,8 @@ test("Admin Exam Management: create, add multi-type questions, publish, student 
     body: JSON.stringify({
       answers: {
         [q1.id]: 0,
-        [q2.id]: [0, 1],
-        [q3.id]: "ipcRenderer.invoke",
+        [q2.id]: 1,
+        [q3.id]: 2,
       },
       flags: [q3.id],
     }),
@@ -226,8 +227,8 @@ test("Admin Exam Management: create, add multi-type questions, publish, student 
     body: JSON.stringify({
       answers: {
         [q1.id]: 0,
-        [q2.id]: [0, 1],
-        [q3.id]: "ipcRenderer.invoke",
+        [q2.id]: 1,
+        [q3.id]: 2,
       },
     }),
   });

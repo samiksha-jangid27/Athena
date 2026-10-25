@@ -61,6 +61,60 @@ function gradeQuestion(question, studentAnswerRaw) {
   }
 }
 
+// Validates a student answer payload against the questions of that attempt's
+// exam. Returns an error message, or null when the payload is acceptable.
+// Only single-answer MCQs with four options are supported by the product.
+function validateAnswerPayload(questions, answersMap) {
+  if (answersMap === null || typeof answersMap !== "object" || Array.isArray(answersMap)) {
+    return "answers must be an object mapping question ids to option indices";
+  }
+  const byId = new Map(questions.map((q) => [String(q.id), q]));
+  for (const [questionId, value] of Object.entries(answersMap)) {
+    const question = byId.get(String(questionId));
+    if (!question) return `Question ${questionId} does not belong to this exam`;
+    if (question.type !== "MCQ") return `Question ${questionId} is not a multiple-choice question`;
+    const optionCount = Array.isArray(question.options) ? question.options.length : 0;
+    if (!Number.isInteger(value) || value < 0 || value >= optionCount) {
+      return `Answer for question ${questionId} must be one of the ${optionCount} options`;
+    }
+  }
+  return null;
+}
+
+function validateFlags(questions, flagsList) {
+  if (flagsList === null || flagsList === undefined) return null;
+  if (!Array.isArray(flagsList)) return "flags must be an array of question ids";
+  const ids = new Set(questions.map((q) => String(q.id)));
+  for (const flag of flagsList) {
+    if (!ids.has(String(flag))) return `Flagged question ${flag} does not belong to this exam`;
+  }
+  return null;
+}
+
+// Validates that a question payload is a supported single-answer MCQ with four
+// options. Athena's active exam flow is multiple-choice only, so the admin
+// endpoints reject anything else before it reaches the database.
+// Returns an error message, or null when the payload is acceptable.
+function validateMcqQuestion({ type, prompt, options, correctAnswer, marks }) {
+  if (type && type !== "MCQ") {
+    return "Only multiple-choice (MCQ) questions are supported";
+  }
+  if (!prompt || !String(prompt).trim()) return "Question prompt is required";
+  if (!Array.isArray(options) || options.length !== 4) {
+    return "MCQ questions require exactly four options";
+  }
+  if (options.some((option) => !String(option ?? "").trim())) {
+    return "Every option must have text";
+  }
+  if (!Number.isInteger(correctAnswer) || correctAnswer < 0 || correctAnswer > 3) {
+    return "Correct answer must be an option index between 1 and 4";
+  }
+  if (marks !== undefined && (!Number.isFinite(Number(marks)) || Number(marks) < 1)) {
+    return "Marks must be at least 1";
+  }
+  return null;
+}
+
 function gradeAttempt(questions, submittedAnswersMap) {
   let autoScore = 0;
   let maxPossible = 0;
@@ -98,4 +152,7 @@ module.exports = {
   normalizeAnswer,
   gradeQuestion,
   gradeAttempt,
+  validateAnswerPayload,
+  validateFlags,
+  validateMcqQuestion,
 };
