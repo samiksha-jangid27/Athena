@@ -458,6 +458,153 @@ test("invalid, expired and wrong-role tokens are rejected clearly", async () => 
   assert.equal((await call("/api/nope", { token: admin })).res.status, 404);
 });
 
+test("answer payloads are validated against the exam's MCQ questions", async () => {
+  const admin = await adminToken();
+  const student = await createStudent(admin);
+  const { exam, questions } = await createPublishedMcqExam(admin, { count: 2, marks: 10 });
+
+  const start = await startExam(student, exam.id);
+  const attemptToken = start.data.token;
+
+  const badOption = await call("/api/student/attempt/answers", {
+    method: "PUT",
+    token: attemptToken,
+    body: { answers: { [questions[0].id]: 9 } },
+  });
+  assert.equal(badOption.res.status, 400);
+  assert.match(badOption.data.message, /must be one of the 4 options/);
+
+  const unknownQuestion = await call("/api/student/attempt/answers", {
+    method: "PUT",
+    token: attemptToken,
+    body: { answers: { "not-in-this-exam": 0 } },
+  });
+  assert.equal(unknownQuestion.res.status, 400);
+  assert.match(unknownQuestion.data.message, /does not belong to this exam/);
+
+  const badFlag = await call("/api/student/attempt/answers", {
+    method: "PUT",
+    token: attemptToken,
+    body: { answers: {}, flags: ["not-in-this-exam"] },
+  });
+  assert.equal(badFlag.res.status, 400);
+
+  // A valid option index for a real question is accepted.
+  const ok = await call("/api/student/attempt/answers", {
+    method: "PUT",
+    token: attemptToken,
+    body: { answers: { [questions[0].id]: 2 } },
+  });
+  assert.equal(ok.res.status, 200);
+  assert.deepEqual(ok.data.attempt.answers, { [questions[0].id]: 2 });
+});
+
+test("a locked attempt refuses late saves and ignores a tampered submit payload", async () => {
+  const admin = await adminToken();
+  const student = await createStudent(admin);
+  const { exam, questions } = await createPublishedMcqExam(admin, { count: 2, marks: 10 });
+
+  const start = await startExam(student, exam.id);
+  const attemptToken = start.data.token;
+
+  // Save both answers correctly while the attempt is in progress.
+  await call("/api/student/attempt/answers", {
+    method: "PUT",
+    token: attemptToken,
+    body: { answers: { [questions[0].id]: 0, [questions[1].id]: 0 } },
+  });
+
+  // A fullscreen exit locks the attempt.
+  const locked = await call("/api/student/attempt/events", {
+    method: "POST",
+    token: attemptToken,
+    body: { events: [{ id: "lock-once-0123456789ab", type: "fullscreen-exit" }] },
+  });
+  assert.equal(locked.res.status, 200);
+  assert.equal(locked.data.attempt.status, "locked");
+
+  // Late saves are rejected outright.
+  const lateSave = await call("/api/student/attempt/answers", {
+    method: "PUT",
+    token: attemptToken,
+    body: { answers: { [questions[0].id]: 1 } },
+  });
+  assert.equal(lateSave.res.status, 409);
+
+  // Submitting a different payload must not change the grade: the stored
+  // (correct) answers are graded, never the tampered ones.
+  const submit = await call("/api/student/attempt/submit", {
+    method: "POST",
+    token: attemptToken,
+    body: { answers: { [questions[0].id]: 1, [questions[1].id]: 1 } },
+  });
+  assert.equal(submit.res.status, 200);
+  assert.equal(submit.data.attempt.status, "submitted");
+  assert.equal(submit.data.result.correct, 2, "the tampered payload was ignored");
+  assert.equal(submit.data.result.score, 20);
+  assert.equal(submit.data.result.maxScore, 20);
+
+  // The stored answers are still the originals.
+  const { res: viewRes, data: view } = await call("/api/student/attempt", { token: attemptToken });
+  assert.equal(viewRes.status, 200);
+  assert.deepEqual(view.attempt.answers, { [questions[0].id]: 0, [questions[1].id]: 0 });
+});
+
+test("evidence uploads are validated and closed once the attempt is finished", async () => {
+  const admin = await adminToken();
+  const student = await createStudent(admin);
+  const { exam, questions } = await createPublishedMcqExam(admin, { count: 1, marks: 10 });
+
+  const start = await startExam(student, exam.id);
+  const attemptToken = start.data.token;
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]).toString("base64");
+
+  const badKind = await call("/api/student/attempt/evidence", {
+    method: "POST",
+    token: attemptToken,
+    body: { kind: "microphone", base64: jpeg },
+  });
+  assert.equal(badKind.res.status, 400);
+  assert.match(badKind.data.message, /'camera' or 'screen'/);
+
+  const notJpeg = await call("/api/student/attempt/evidence", {
+    method: "POST",
+    token: attemptToken,
+    body: { kind: "camera", base64: Buffer.from("this is not an image").toString("base64") },
+  });
+  assert.equal(notJpeg.res.status, 400);
+  assert.match(notJpeg.data.message, /JPEG/);
+
+  const garbage = await call("/api/student/attempt/evidence", {
+    method: "POST",
+    token: attemptToken,
+    body: { kind: "camera", base64: "!!!not base64!!!" },
+  });
+  assert.equal(garbage.res.status, 400);
+  assert.match(garbage.data.message, /base64/);
+
+  const tooBig = await call("/api/student/attempt/evidence", {
+    method: "POST",
+    token: attemptToken,
+    body: { kind: "screen", base64: Buffer.alloc(2 * 1024 * 1024 + 8, 0x41).toString("base64") },
+  });
+  assert.equal(tooBig.res.status, 413);
+
+  // Finish the attempt, then reject any further uploads.
+  await call("/api/student/attempt/submit", {
+    method: "POST",
+    token: attemptToken,
+    body: { answers: { [questions[0].id]: 0 } },
+  });
+  const afterSubmit = await call("/api/student/attempt/evidence", {
+    method: "POST",
+    token: attemptToken,
+    body: { kind: "camera", base64: jpeg },
+  });
+  assert.equal(afterSubmit.res.status, 409);
+  assert.match(afterSubmit.data.message, /submitted/i);
+});
+
 test("repository failures surface as clear 500 errors", async () => {
   const admin = await adminToken();
   const original = db.exams.listAll;
