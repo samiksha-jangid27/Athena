@@ -33,7 +33,13 @@ function StudentApp({ user, token, onSignOut }) {
   useEffect(() => {
     if (phase !== 'active') return undefined
     document.documentElement.dataset.focus = 'exam'
+    athena?.setExamMode?.(true)
     return () => delete document.documentElement.dataset.focus
+  }, [phase])
+
+  useEffect(() => {
+    if (phase !== 'active') athena?.setExamMode?.(false)
+    return () => athena?.setExamMode?.(false)
   }, [phase])
 
   // Release the camera once the exam is over.

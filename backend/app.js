@@ -28,6 +28,25 @@ function sendError(res, status, message, extra = {}) {
   return res.status(status).json({ message, ...extra });
 }
 
+function attemptTokenForSession(sessionId) {
+  const secret = process.env.ATHENA_ATTEMPT_TOKEN_SECRET || process.env.ATHENA_JWT_SECRET || "athena-dev-attempt-token";
+  return crypto.createHmac("sha256", secret).update(sessionId).digest("hex");
+}
+
+function attemptAnswers(attempt) {
+  const answers = {};
+  const flags = [];
+  for (const answer of attempt.submittedAnswers || []) {
+    try {
+      answers[answer.questionId] = JSON.parse(answer.answerValue);
+    } catch {
+      answers[answer.questionId] = answer.answerValue;
+    }
+    if (answer.isFlagged) flags.push(answer.questionId);
+  }
+  return { answers, flags };
+}
+
 function questionForStudent(q) {
   let options = [];
   try {
@@ -35,6 +54,7 @@ function questionForStudent(q) {
   } catch {
     options = [];
   }
+
   return {
     id: q.id,
     type: q.type,
@@ -665,26 +685,43 @@ function createApp(config = {}) {
         return sendError(res, 404, "Exam is not published or does not exist");
       }
 
-      // Check if student already has an active attempt
+      const startRequestId = req.get("x-athena-start-id");
+      const deterministicSessionId = startRequestId && /^[A-Za-z0-9_-]{16,80}$/.test(startRequestId)
+        ? `session-${crypto.createHash("sha256").update(`${req.user.id}:${exam.id}:${startRequestId}`).digest("hex").slice(0, 48)}`
+        : null;
+      const existingByRequest = deterministicSessionId
+        ? await db.attempts.findBySessionId(deterministicSessionId)
+        : null;
+      if (existingByRequest && existingByRequest.userId !== req.user.id) {
+        return sendError(res, 403, "Attempt does not belong to this student");
+      }
       const existing = await db.attempts.findActiveByUserAndExam(req.user.id, exam.id);
-      if (existing) {
+      const activeAttempt = existingByRequest || existing;
+      if (activeAttempt) {
         const questions = await db.questions.listByExam(exam.id);
+        const token = attemptTokenForSession(activeAttempt.sessionId);
+        if (hashToken(token) !== activeAttempt.tokenHash) {
+          await db.attempts.updateTokenHash(activeAttempt.id, hashToken(token));
+        }
+        const saved = attemptAnswers(activeAttempt);
         return res.json({
           message: "Resuming existing active attempt",
-          sessionId: existing.sessionId,
+          token,
+          sessionId: activeAttempt.sessionId,
           attempt: {
-            sessionId: existing.sessionId,
-            status: existing.status.toLowerCase(),
-            deadline: existing.deadline,
+            sessionId: activeAttempt.sessionId,
+            status: activeAttempt.status.toLowerCase().replace(/_/g, "-"),
+            deadline: activeAttempt.deadline,
             serverTime: new Date().toISOString(),
+            ...saved,
           },
           exam: { id: exam.id, title: exam.title, durationMinutes: exam.durationMinutes },
           questions: questions.map(questionForStudent),
         });
       }
 
-      const sessionId = `session-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
-      const token = crypto.randomBytes(24).toString("hex");
+      const sessionId = deterministicSessionId || `session-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
+      const token = attemptTokenForSession(sessionId);
       const attempt = await db.attempts.create({
         sessionId,
         tokenHash: hashToken(token),

@@ -21,5 +21,6 @@ contextBridge.exposeInMainWorld("athena", {
   onScreenSnapshotCaptured: (callback) => subscribe("proctoring:screen-snap-captured", callback),
   onCloseRequest: (callback) => subscribe("app:close-request", callback),
   respondToCloseRequest: (submitted) => ipcRenderer.invoke("app:close-response", Boolean(submitted)),
+  setExamMode: (active) => ipcRenderer.invoke("app:set-exam-mode", Boolean(active)),
   onShortcutBlocked: (callback) => subscribe("security:shortcut-blocked", callback),
 });

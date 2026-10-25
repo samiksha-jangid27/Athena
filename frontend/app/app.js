@@ -215,6 +215,12 @@ handle("app:close-response", (submitted) => {
   return true;
 });
 
+handle("app:set-exam-mode", (active) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  mainWindow.setKiosk(Boolean(active));
+  return true;
+});
+
 handle("proctoring:save-camera-snap", (bytes, sessionId) => {
   const valid = toSnapshotBytes(bytes);
   if (!valid) throw new Error("Invalid camera snapshot");
@@ -272,6 +278,7 @@ function createWindow() {
 
   mainWindow.on("closed", () => {
     stopProctoring();
+    closeAfterSubmission = false;
     mainWindow = null;
   });
 
@@ -311,6 +318,7 @@ app.whenReady().then(async () => {
 
 app.on("before-quit", () => {
   stopProctoring();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setKiosk(false);
   if (backendProcess) backendProcess.kill();
 });
 

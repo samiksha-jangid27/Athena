@@ -32,7 +32,7 @@ export function setApiUrl(url) {
 
 export const API_URL = getApiUrl()
 
-async function request(path, { method = 'GET', token, body, timeoutMs = 12000, headers: extraHeaders = {} } = {}) {
+async function request(path, { method = 'GET', token, body, timeoutMs = 30000, headers: extraHeaders = {} } = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
   const currentBase = getApiUrl().replace(/\/+$/, '')
@@ -84,8 +84,13 @@ export const api = {
   // ---------------- Student API ----------------
   student: {
     listExams: (token) => request('/api/student/exams', { token }),
-    startExam: (token, examId) =>
-      request(`/api/student/exams/${encodeURIComponent(examId)}/start`, { method: 'POST', token }),
+    startExam: (token, examId, startRequestId) =>
+      request(`/api/student/exams/${encodeURIComponent(examId)}/start`, {
+        method: 'POST',
+        token,
+        headers: { 'x-athena-start-id': startRequestId },
+        timeoutMs: 30000,
+      }),
     getAttempt: (attemptToken) =>
       request('/api/student/attempt', { token: attemptToken }),
     saveAnswers: (attemptToken, answers, flags) =>

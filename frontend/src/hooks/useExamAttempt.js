@@ -36,6 +36,7 @@ export function useExamAttempt() {
   const eventsRef = useRef([])
   const prevDeadlineRef = useRef(null)
   const submittingRef = useRef(false)
+  const startRequestIdRef = useRef(null)
   const stateRef = useRef({})
   // Latest values for async callbacks (timers, retries).
   useLayoutEffect(() => {
@@ -174,6 +175,9 @@ export function useExamAttempt() {
 
   // ---- Start / recover ----
   const loadAttempt = useCallback((data, newToken, local) => {
+    if (!data?.token || !data.attempt || !Array.isArray(data.questions)) {
+      throw new Error('The exam service returned an incomplete attempt. Please retry.')
+    }
     const merged = mergeRecovered(data.attempt, local)
     dirtyRef.current = merged.recovered
     eventsRef.current = local?.pendingEvents || []
@@ -193,14 +197,20 @@ export function useExamAttempt() {
   }, [applyServer])
 
   const begin = useCallback(async (userId, name, examId, studentJwt) => {
+    if (!startRequestIdRef.current) {
+      startRequestIdRef.current = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    }
     let data
     if (studentJwt && examId) {
-      data = await api.student.startExam(studentJwt, examId)
+      data = await withRetry(
+        () => api.student.startExam(studentJwt, examId, startRequestIdRef.current),
+        { retries: 3, baseDelayMs: 750 },
+      )
     } else {
-      data = await api.start(userId, name)
+      data = await withRetry(() => api.start(userId, name), { retries: 3, baseDelayMs: 750 })
     }
     loadAttempt(data, data.token, null)
-    logEvent('exam-started')
+    setTimeout(() => logEvent('exam-started'), 0)
   }, [loadAttempt, logEvent])
 
   const recover = useCallback(async () => {
@@ -294,6 +304,7 @@ export function useExamAttempt() {
     setFlags([])
     setResult(null)
     setRecovery('done')
+    startRequestIdRef.current = null
   }, [])
 
   return {

@@ -584,6 +584,17 @@ const db = {
       );
     },
 
+    async updateTokenHash(id, tokenHash) {
+      if (prismaClient) {
+        return prismaClient.attempt.update({ where: { id }, data: { tokenHash } });
+      }
+      const attempt = memoryStore.attempts.find((item) => item.id === id);
+      if (!attempt) throw new Error("Attempt not found");
+      attempt.tokenHash = tokenHash;
+      attempt.updatedAt = new Date();
+      return attempt;
+    },
+
     async listByExam(examId) {
       if (prismaClient) {
         return prismaClient.attempt.findMany({
