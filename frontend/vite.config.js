@@ -10,7 +10,7 @@ const CSP = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "media-src 'self' blob: mediastream:",
-  `connect-src ${API_ORIGIN}`,
+  `connect-src ${API_ORIGIN} https://athena-backend-2a0l.onrender.com`,
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
