@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { api } from '../services/api.js'
 import { formatDuration } from '../lib/exam.js'
 import { EVENT_LABEL, STATUS_LABEL, STATUS_TONE, attemptRemaining, evidenceHint, validateExtension } from '../lib/instructor.js'
@@ -27,6 +27,38 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
   const [reviewNotes, setReviewNotes] = useState(attempt.reviewNotes || '')
   const [savingGrade, setSavingGrade] = useState(false)
   const [previewEvidence, setPreviewEvidence] = useState(null)
+  const [detail, setDetail] = useState(null)
+  const [evidenceUrls, setEvidenceUrls] = useState({})
+
+  useEffect(() => {
+    if (!adminToken) return undefined
+    let active = true
+    api.admin.getAttempt(adminToken, attempt.sessionId)
+      .then((response) => { if (active) setDetail(response.attempt) })
+      .catch(() => {})
+    return () => { active = false }
+  }, [adminToken, attempt.sessionId])
+
+  const reviewedAttempt = detail || attempt
+  const answerByQuestion = new Map((reviewedAttempt.submittedAnswers || []).map((answer) => [answer.questionId, answer]))
+  const questions = reviewedAttempt.exam?.questions || []
+  useEffect(() => {
+    if (!adminToken || !reviewedAttempt.evidence?.length) return undefined
+    let active = true
+    const urls = {}
+    Promise.all(reviewedAttempt.evidence.map(async (evidence) => {
+      try {
+        const blob = await api.admin.fetchEvidence(adminToken, evidence.id)
+        urls[evidence.id] = URL.createObjectURL(blob)
+      } catch {
+        // The timeline remains useful if an individual capture is unavailable.
+      }
+    })).then(() => { if (active) setEvidenceUrls(urls) })
+    return () => {
+      active = false
+      Object.values(urls).forEach((url) => URL.revokeObjectURL(url))
+    }
+  }, [adminToken, reviewedAttempt.evidence])
 
   const remaining = attemptRemaining(attempt, serverOffset, now)
   const extensionError = validateExtension(minutes)
@@ -157,13 +189,38 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
       </section>
 
       {/* Proctoring Evidence Thumbnails */}
-      {attempt.evidence && attempt.evidence.length > 0 && (
+      {reviewedAttempt.submittedAnswers && (
+        <section className="answers-section card" style={{ padding: '16px' }}>
+          <h3 style={{ fontSize: 'var(--text-sm)', marginBottom: '8px' }}>Answers and unanswered questions</h3>
+          <div className="table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Question</th><th>Answer</th><th>Marks</th></tr></thead>
+              <tbody>
+                {(questions.length ? questions : reviewedAttempt.submittedAnswers).map((questionOrAnswer) => {
+                  const answer = questionOrAnswer.questionId ? questionOrAnswer : answerByQuestion.get(questionOrAnswer.id)
+                  return (
+                  <tr key={questionOrAnswer.id || questionOrAnswer.questionId}>
+                    <td>{questionOrAnswer.prompt || questionOrAnswer.question?.prompt || questionOrAnswer.questionId}</td>
+                    <td>{answer?.answerValue ? (() => {
+                      try { return JSON.stringify(JSON.parse(answer.answerValue)) } catch { return answer.answerValue }
+                    })() : 'Unanswered'}</td>
+                    <td>{answer?.autoMarks ?? 0}</td>
+                  </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {reviewedAttempt.evidence && reviewedAttempt.evidence.length > 0 && (
         <section className="evidence-section card" style={{ padding: '16px' }}>
           <h3 style={{ fontSize: 'var(--text-sm)', marginBottom: '8px' }}>
             Proctoring Evidence ({attempt.evidence.length} captures)
           </h3>
           <div className="evidence-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: '8px' }}>
-            {attempt.evidence.map((ev) => (
+            {reviewedAttempt.evidence.map((ev) => (
               <button
                 key={ev.id}
                 type="button"
@@ -171,7 +228,7 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
                 style={{ border: '1px solid var(--border)', borderRadius: '4px', overflow: 'hidden', background: '#000', cursor: 'pointer', padding: 0 }}
                 onClick={() => setPreviewEvidence(ev)}>
                 <img
-                  src={api.admin.evidenceUrl(ev.id)}
+                  src={evidenceUrls[ev.id]}
                   alt={`${ev.kind} capture`}
                   style={{ width: '100%', height: '60px', objectFit: 'cover' }}
                   onError={(e) => { e.currentTarget.style.display = 'none' }}
@@ -240,7 +297,7 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
         {previewEvidence && (
           <div style={{ textAlign: 'center' }}>
             <img
-              src={api.admin.evidenceUrl(previewEvidence.id)}
+              src={evidenceUrls[previewEvidence.id]}
               alt="Proctoring capture full size"
               style={{ maxWidth: '100%', maxHeight: '450px', borderRadius: '4px' }}
             />
