@@ -68,13 +68,12 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
   const [examQuestions, setExamQuestions] = useState([])
   const [loadingQuestions, setLoadingQuestions] = useState(false)
   const [showAddQuestion, setShowAddQuestion] = useState(false)
-  const [qType, setQType] = useState('MCQ')
   const [qPrompt, setQPrompt] = useState('')
   const [qOption1, setQOption1] = useState('')
   const [qOption2, setQOption2] = useState('')
   const [qOption3, setQOption3] = useState('')
   const [qOption4, setQOption4] = useState('')
-  const [qCorrect, setQCorrect] = useState('0')
+  const [qCorrect, setQCorrect] = useState('1')
   const [qMarks, setQMarks] = useState('10')
   const [addingQuestion, setAddingQuestion] = useState(false)
 
@@ -230,42 +229,55 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
     }
   }
 
-  // Add Question Action
+  // Add Question Action: all new questions are single-answer MCQs with exactly four options.
   const handleAddQuestion = async (e) => {
     e.preventDefault()
-    if (!qPrompt.trim()) return
+
+    const prompt = qPrompt.trim()
+    const options = [qOption1, qOption2, qOption3, qOption4].map((option) => option.trim())
+    const correct = Number(qCorrect)
+    const marks = Number(qMarks)
+
+    if (!prompt) {
+      notify('Enter a question prompt.', 'error')
+      return
+    }
+
+    if (options.some((option) => !option)) {
+      notify('Fill in all four options.', 'error')
+      return
+    }
+
+    if (!Number.isInteger(correct) || correct < 1 || correct > 4) {
+      notify('Correct option number must be between 1 and 4.', 'error')
+      return
+    }
+
+    if (!Number.isFinite(marks) || marks < 1) {
+      notify('Marks must be at least 1.', 'error')
+      return
+    }
+
     setAddingQuestion(true)
     try {
-      let options = []
-      let correct = qCorrect
-
-      if (qType === 'MCQ' || qType === 'MSQ') {
-        options = [qOption1, qOption2, qOption3, qOption4].filter(Boolean)
-        if (qType === 'MSQ') {
-          // split comma separated indices
-          correct = qCorrect.split(',').map((x) => Number(x.trim())).filter((n) => !isNaN(n))
-        } else {
-          correct = Number(qCorrect) || 0
-        }
-      } else if (qType === 'TRUE_FALSE') {
-        options = ['True', 'False']
-        correct = Number(qCorrect) || 0
-      } else if (qType === 'SHORT_ANSWER') {
-        options = []
-        correct = qCorrect.trim()
-      }
-
       await api.admin.addQuestion(adminToken, selectedExamForQuestions.id, {
-        type: qType,
-        prompt: qPrompt.trim(),
+        type: 'MCQ',
+        prompt,
         options,
-        correctAnswer: correct,
-        marks: Number(qMarks) || 1,
+        // The backend stores option indexes starting at 0; the form uses 1-4 for clarity.
+        correctAnswer: correct - 1,
+        marks,
       })
 
       notify('Question added successfully.', 'success')
       setShowAddQuestion(false)
       setQPrompt('')
+      setQOption1('')
+      setQOption2('')
+      setQOption3('')
+      setQOption4('')
+      setQCorrect('1')
+      setQMarks('10')
       openQuestionManager(selectedExamForQuestions)
       refreshExams()
     } catch (err) {
@@ -716,40 +728,38 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
           </>
         )}>
         <form onSubmit={handleAddQuestion} className="modal-form-grid">
-          <Field label="Question Type" as="select" value={qType} onChange={(e) => setQType(e.target.value)}>
-            <select value={qType} onChange={(e) => setQType(e.target.value)} style={{ width: '100%', height: '36px' }}>
-              <option value="MCQ">Multiple Choice (Single Answer)</option>
-              <option value="MSQ">Multiple Select (One or more answers)</option>
-              <option value="TRUE_FALSE">True / False</option>
-              <option value="SHORT_ANSWER">Short Answer / Essay</option>
-            </select>
-          </Field>
+          <Field
+            label="Question Prompt"
+            value={qPrompt}
+            required
+            onChange={(e) => setQPrompt(e.target.value)}
+          />
 
-          <Field label="Question Prompt" value={qPrompt} required onChange={(e) => setQPrompt(e.target.value)} />
+          <Field label="Option 1" value={qOption1} required onChange={(e) => setQOption1(e.target.value)} />
+          <Field label="Option 2" value={qOption2} required onChange={(e) => setQOption2(e.target.value)} />
+          <Field label="Option 3" value={qOption3} required onChange={(e) => setQOption3(e.target.value)} />
+          <Field label="Option 4" value={qOption4} required onChange={(e) => setQOption4(e.target.value)} />
 
-          {(qType === 'MCQ' || qType === 'MSQ') && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <Field label="Option 1" value={qOption1} onChange={(e) => setQOption1(e.target.value)} />
-              <Field label="Option 2" value={qOption2} onChange={(e) => setQOption2(e.target.value)} />
-              <Field label="Option 3" value={qOption3} onChange={(e) => setQOption3(e.target.value)} />
-              <Field label="Option 4" value={qOption4} onChange={(e) => setQOption4(e.target.value)} />
-              <Field
-                label={qType === 'MCQ' ? 'Correct Option Index (0 for Option 1, 1 for Option 2...)' : 'Correct Option Indices (comma-separated, e.g. 0,2)'}
-                value={qCorrect}
-                onChange={(e) => setQCorrect(e.target.value)}
-              />
-            </div>
-          )}
+          <Field
+            label="Correct Option Number (enter 1, 2, 3, or 4)"
+            type="number"
+            min="1"
+            max="4"
+            step="1"
+            value={qCorrect}
+            required
+            onChange={(e) => setQCorrect(e.target.value)}
+          />
 
-          {qType === 'TRUE_FALSE' && (
-            <Field label="Correct Choice (0 for True, 1 for False)" value={qCorrect} onChange={(e) => setQCorrect(e.target.value)} />
-          )}
-
-          {qType === 'SHORT_ANSWER' && (
-            <Field label="Objective Reference Answer or Grading Guidance" value={qCorrect} onChange={(e) => setQCorrect(e.target.value)} />
-          )}
-
-          <Field label="Marks" type="number" value={qMarks} onChange={(e) => setQMarks(e.target.value)} />
+          <Field
+            label="Marks"
+            type="number"
+            min="1"
+            step="1"
+            value={qMarks}
+            required
+            onChange={(e) => setQMarks(e.target.value)}
+          />
         </form>
       </Modal>
 
