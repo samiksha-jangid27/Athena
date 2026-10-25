@@ -28,7 +28,7 @@ export default function ExamScreen({ exam, camera, athena }) {
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement))
   const [activeDisallowed, setActiveDisallowed] = useState([])
   const videoRef = useRef(null)
-  const { logEvent } = exam
+  const { logEvent, submit } = exam
   const snapshot = camera.snapshot
 
   const checkRunningApps = useCallback(async () => {
@@ -129,6 +129,21 @@ export default function ExamScreen({ exam, camera, athena }) {
       athena.stopProctoring()
     }
   }, [athena, sessionId, logEvent, snapshot, checkRunningApps, exam.token])
+
+  useEffect(() => {
+    if (!athena?.onCloseRequest) return undefined
+    const offClose = athena.onCloseRequest(async () => {
+      const submitted = await submit()
+      await athena.respondToCloseRequest(submitted)
+    })
+    const offShortcut = athena.onShortcutBlocked?.((key) => {
+      logEvent('prohibited-shortcut-blocked', `Blocked shortcut: ${key}`)
+    })
+    return () => {
+      offClose()
+      offShortcut?.()
+    }
+  }, [athena, submit, logEvent])
 
   const { questions, answers, flags, attempt, answerable, pendingLock } = exam
   const question = questions[current]
