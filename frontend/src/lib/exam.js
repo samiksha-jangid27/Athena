@@ -108,6 +108,21 @@ export function isRejection(error) {
   return error instanceof HttpError && error.status >= 400 && error.status < 500
 }
 
+// Turns a failed "start exam" request into a message the student can act on.
+// The server's own message is shown whenever it exists, so a rejected start is
+// never mislabelled as a connection problem.
+export function startErrorMessage(error) {
+  if (error instanceof HttpError) {
+    const serverMessage = error.body?.message
+    if (error.status === 401) return serverMessage || 'Your sign-in has expired. Sign out, sign in again, then restart the exam.'
+    if (error.status === 403) return serverMessage || 'This account is not allowed to start this exam.'
+    if (error.status === 404) return serverMessage || 'This exam is no longer available. Go back and choose another exam.'
+    if (error.status === 409) return serverMessage || 'This exam can no longer be started.'
+    return serverMessage || `The exam service returned an error (${error.status}). Try again in a moment.`
+  }
+  return 'The exam could not be started because the exam service did not respond. Check your connection and try again.'
+}
+
 // Student identification rules (mirrored loosely by the server's limits).
 export function validateIdentity({ name, studentId }) {
   const errors = {}
