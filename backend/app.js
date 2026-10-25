@@ -630,6 +630,11 @@ function createApp(config = {}) {
         record = memoryStore.evidence.find((e) => e.id === req.params.evidenceId);
       }
       if (!record) return sendError(res, 404, "Evidence record not found");
+      if (record.data) {
+        res.setHeader("Content-Type", "image/jpeg");
+        res.setHeader("Cache-Control", "private, no-cache");
+        return res.end(Buffer.from(record.data));
+      }
       const stream = getEvidenceStream(record.storagePath);
       if (!stream) return sendError(res, 404, "Evidence file missing on server");
 
@@ -871,6 +876,7 @@ function createApp(config = {}) {
         storagePath: saved.storagePath,
         filename: saved.filename,
         byteSize: saved.byteSize,
+        data: buffer,
       });
 
       res.status(201).json({ message: "Evidence received and stored safely" });
