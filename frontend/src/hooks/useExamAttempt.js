@@ -81,7 +81,7 @@ export function useExamAttempt() {
     if (!currentToken || eventsRef.current.length === 0) return
     const batch = eventsRef.current.slice(0, 50)
     try {
-      const data = await withRetry(() => api.sendEvents(currentToken, batch), { retries: 2 })
+      const data = await withRetry(() => api.student.sendEvents(currentToken, batch), { retries: 2 })
       eventsRef.current = eventsRef.current.slice(batch.length)
       applyServer(data.attempt)
       if (data.attempt?.status === 'locked' || !eventsRef.current.some((e) => e.type === 'fullscreen-exit')) {
@@ -130,7 +130,7 @@ export function useExamAttempt() {
     setSaveState('saving')
     dirtyRef.current = false
     try {
-      const data = await withRetry(() => api.saveAnswers(currentToken, currentAnswers, currentFlags), { retries: 2 })
+      const data = await withRetry(() => api.student.saveAnswers(currentToken, currentAnswers, currentFlags), { retries: 2 })
       applyServer(data.attempt)
       setSaveState('saved')
       setLastSavedAt(Date.now())
@@ -175,16 +175,20 @@ export function useExamAttempt() {
   }, [answers, flags, token, persist, saveNow])
 
   // ---- Start / recover ----
-  const loadAttempt = useCallback((data, newToken, local) => {
-    if (!data?.token || !data.attempt || !Array.isArray(data.questions)) {
+  // `attemptToken` is the token the student already holds: freshly issued by
+  // start, or restored from local storage on recovery. The active-attempt
+  // endpoint deliberately does not echo the raw token back, so we validate the
+  // real response fields (attempt + questions) instead of `data.token`.
+  const loadAttempt = useCallback((data, attemptToken, local) => {
+    if (!attemptToken || !data?.attempt || !Array.isArray(data.questions)) {
       throw new Error('The exam service returned an incomplete attempt. Please retry.')
     }
     const merged = mergeRecovered(data.attempt, local)
     dirtyRef.current = merged.recovered
     eventsRef.current = local?.pendingEvents || []
     submittingRef.current = false
-    stateRef.current = { token: newToken, answers: merged.answers, flags: merged.flags }
-    setToken(newToken)
+    stateRef.current = { token: attemptToken, answers: merged.answers, flags: merged.flags }
+    setToken(attemptToken)
     setQuestions(data.questions)
     setExamTitle(data.exam?.title || 'Exam')
     setExamInfo(data.exam || null)
@@ -201,18 +205,19 @@ export function useExamAttempt() {
   }, [applyServer])
 
   const begin = useCallback(async (userId, name, examId, studentJwt) => {
+    // The active exam flow is the authenticated, database-backed student API.
+    // There is no unauthenticated fallback: every attempt is tied to a student
+    // JWT and a server-side attempt token.
+    if (!studentJwt || !examId) {
+      throw new Error('Sign in and pick an exam before starting an attempt.')
+    }
     if (!startRequestIdRef.current) {
       startRequestIdRef.current = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`
     }
-    let data
-    if (studentJwt && examId) {
-      data = await withRetry(
-        () => api.student.startExam(studentJwt, examId, startRequestIdRef.current),
-        { retries: 3, baseDelayMs: 750 },
-      )
-    } else {
-      data = await withRetry(() => api.start(userId, name), { retries: 3, baseDelayMs: 750 })
-    }
+    const data = await withRetry(
+      () => api.student.startExam(studentJwt, examId, startRequestIdRef.current),
+      { retries: 3, baseDelayMs: 750 },
+    )
     loadAttempt(data, data.token, null)
     setTimeout(() => logEvent('exam-started'), 0)
   }, [loadAttempt, logEvent])
@@ -225,7 +230,7 @@ export function useExamAttempt() {
     }
     setRecovery('loading')
     try {
-      const data = await api.getAttempt(local.token)
+      const data = await api.student.getAttempt(local.token)
       const recovered = loadAttempt(data, local.token, local)
       if (data.attempt.status === 'submitted') clearLocal()
       else eventsRef.current.push(makeEvent('answers-recovered', recovered ? 'unsaved local answers restored' : undefined))
@@ -251,7 +256,7 @@ export function useExamAttempt() {
       await flushEvents()
       await saveNow()
       try {
-        const data = await api.getAttempt(stateRef.current.token)
+        const data = await api.student.getAttempt(stateRef.current.token)
         applyServer(data.attempt)
       } catch {
         setSaveState((state) => (state === 'saved' ? state : 'offline'))
@@ -272,7 +277,7 @@ export function useExamAttempt() {
     setSubmitError('')
     try {
       await flushEvents()
-      const data = await withRetry(() => api.submit(currentToken, currentAnswers, currentFlags), { retries: 3 })
+      const data = await withRetry(() => api.student.submit(currentToken, currentAnswers, currentFlags), { retries: 3 })
       applyServer(data.attempt)
       setResult(data.result)
       clearLocal()
@@ -283,7 +288,7 @@ export function useExamAttempt() {
       // after the first request succeeded), load and show the saved result.
       if (error instanceof HttpError && error.status === 409) {
         try {
-          const data = await api.getAttempt(currentToken)
+          const data = await api.student.getAttempt(currentToken)
           if (data?.attempt?.status === 'submitted') {
             applyServer(data.attempt)
             setResult(data.result || { status: 'submitted' })

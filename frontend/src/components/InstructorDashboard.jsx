@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../services/api.js'
-import { formatDuration } from '../lib/exam.js'
+import { formatDuration, HttpError } from '../lib/exam.js'
 import {
   STATUS_LABEL,
   STATUS_TONE,
@@ -37,6 +37,14 @@ const STATUS_FILTERS = [
   ['expired', 'Expired'],
 ]
 
+// Turns a monitor request failure into a clear, differentiated message. Server
+// refusals keep their own wording; network problems are explained instead of
+// surfacing a bare "Failed to fetch".
+function monitorError(error) {
+  if (error instanceof HttpError) return error.body?.message || error.message
+  return `${api.describeConnectionError(error).message} Use Retry to try again.`
+}
+
 export default function InstructorDashboard({ adminUser, adminToken, onSignOut }) {
   const notify = useToast()
   const now = useNow()
@@ -48,6 +56,8 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
   const [attempts, setAttempts] = useState([])
   const [loadingAttempts, setLoadingAttempts] = useState(true)
   const [attemptsError, setAttemptsError] = useState(null)
+  // Driven by the real list-attempts request, not a hard-coded phrase.
+  const [backendStatus, setBackendStatus] = useState('checking')
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [sort, setSort] = useState('activity')
@@ -89,16 +99,18 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
   // Load attempts
   const refreshAttempts = async () => {
     try {
-      let list = []
-      if (adminToken) {
-        list = await api.admin.listAttempts(adminToken)
-      } else {
-        list = await api.listAttempts('test')
-      }
+      const list = adminToken ? await api.admin.listAttempts(adminToken) : await api.listAttempts('test')
       setAttempts((list || []).map((item) => ({ ...item, status: normalizeStatus(item.status) })))
       setAttemptsError(null)
+      setBackendStatus('online')
     } catch (err) {
-      setAttemptsError(err.message || 'Failed to load attempts')
+      // An expired admin session must sign out, not linger on a dead dashboard.
+      if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+        onSignOut?.()
+        return
+      }
+      setAttemptsError(monitorError(err))
+      setBackendStatus('offline')
     } finally {
       setLoadingAttempts(false)
     }
@@ -140,13 +152,18 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
         if (active) {
           setAttempts((list || []).map((item) => ({ ...item, status: normalizeStatus(item.status) })))
           setAttemptsError(null)
+          setBackendStatus('online')
           setLoadingAttempts(false)
         }
       } catch (err) {
-        if (active) {
-          setAttemptsError(err.message || 'Failed to load attempts')
-          setLoadingAttempts(false)
+        if (!active) return
+        if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+          onSignOut?.()
+          return
         }
+        setAttemptsError(monitorError(err))
+        setBackendStatus('offline')
+        setLoadingAttempts(false)
       }
     }
     load()
@@ -155,6 +172,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
       active = false
       clearInterval(timer)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminToken])
 
   useEffect(() => {
@@ -351,7 +369,12 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
           <span className="eyebrow">Athena Administration</span>
           <h1>Central Command</h1>
           <p className="subtle">
-            Logged in as <strong>{adminUser?.name || 'Administrator'}</strong>. Connected to shared backend.
+            Logged in as <strong>{adminUser?.name || 'Administrator'}</strong>.{' '}
+            {backendStatus === 'online'
+              ? 'Connected to the exam backend.'
+              : backendStatus === 'offline'
+              ? 'Cannot reach the exam backend.'
+              : 'Checking backend connection…'}
           </p>
         </div>
 
@@ -408,7 +431,14 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
             </dl>
           </div>
 
-          {attemptsError && <Callout tone="warning" role="alert">{attemptsError}</Callout>}
+          {attemptsError && (
+            <Callout tone="warning" role="alert">
+              <span>{attemptsError}</span>{' '}
+              <Button size="sm" variant="secondary" icon="refresh" onClick={refreshAttempts}>
+                Retry
+              </Button>
+            </Callout>
+          )}
 
           <div className="monitor-toolbar">
             <label className="search">

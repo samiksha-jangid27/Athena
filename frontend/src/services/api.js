@@ -1,21 +1,28 @@
 import { HttpError } from '../lib/exam.js'
+import { resolveApiUrl } from '../lib/backend.js'
 
 const STORED_URL_KEY = 'athena.api_url'
 
-const ENV_API_URL = (import.meta.env.VITE_ATHENA_API_URL || '').replace(/\/+$/, '')
-const DEFAULT_HOST = 'https://athena-backend-2a0l.onrender.com'
+const ENV_API_URL = import.meta.env.VITE_ATHENA_API_URL || ''
 
 export function getApiUrl() {
-  // Packaged builds are pinned to the backend they were built for: a leftover
-  // or tampered value in local storage must never be able to repoint the exam
-  // client at a different server.
-  if (import.meta.env.PROD) return ENV_API_URL || DEFAULT_HOST
+  // resolveApiUrl pins packaged builds to their build-time backend, so a
+  // leftover or tampered value in local storage can never repoint the exam
+  // client at a different (or dead) server.
   const stored = typeof window !== 'undefined' ? window.localStorage.getItem(STORED_URL_KEY) : ''
-  if (stored?.trim()) return stored.trim().replace(/\/+$/, '')
-  return ENV_API_URL || 'http://127.0.0.1:3000'
+  return resolveApiUrl({ isProd: import.meta.env.PROD, envUrl: ENV_API_URL, storedUrl: stored })
+}
+
+// Packaged builds are pinned to the backend they were built for, so the
+// server-config dialog must not pretend a saved override takes effect.
+export function isApiUrlLocked() {
+  return Boolean(import.meta.env.PROD)
 }
 
 export function setApiUrl(url) {
+  // Ignore edits in packaged builds: the URL is baked in at build time and a
+  // stale local-storage value must never repoint the client at another server.
+  if (isApiUrlLocked()) return false
   if (typeof window !== 'undefined') {
     if (!url || !url.trim()) {
       window.localStorage.removeItem(STORED_URL_KEY)
@@ -23,9 +30,36 @@ export function setApiUrl(url) {
       window.localStorage.setItem(STORED_URL_KEY, url.trim())
     }
   }
+  return true
 }
 
 export const API_URL = getApiUrl()
+
+// Turns a failed request into a short, differentiated, secret-free diagnosis.
+// The message is derived from the error only; it never echoes request bodies.
+export function describeConnectionError(error) {
+  if (error?.name === 'AbortError') {
+    return { category: 'timeout', message: 'The server did not answer in time. Check the URL or your network.' }
+  }
+  if (error instanceof HttpError) {
+    if (error.status === 404) {
+      return { category: 'http', message: 'Reached a server, but it has no Athena API at this address (404).' }
+    }
+    if (error.status >= 500) {
+      return { category: 'http', message: `The Athena server reported an error (HTTP ${error.status}).` }
+    }
+    return { category: 'http', message: error.body?.message || `The server rejected the request (HTTP ${error.status}).` }
+  }
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { category: 'offline', message: 'This device appears to be offline. Reconnect and try again.' }
+  }
+  // fetch throws a TypeError for DNS failures, refused connections and blocked
+  // origins alike, so the wording stays honest about that ambiguity.
+  return {
+    category: 'network',
+    message: 'Could not reach the server. Check the URL, your network, or whether the backend allows this app origin.',
+  }
+}
 
 async function request(path, { method = 'GET', token, body, timeoutMs = 30000, headers: extraHeaders = {} } = {}) {
   const controller = new AbortController()
@@ -76,7 +110,42 @@ async function fetchResultsCsv(examId, token) {
 export const api = {
   getApiUrl,
   setApiUrl,
+  isApiUrlLocked,
+  describeConnectionError,
   health: () => request('/health', { timeoutMs: 6000 }),
+
+  // One diagnostic pass used by the server-configuration dialog: it reports the
+  // effective URL, whether that URL is pinned by the build, latency, database
+  // health and a differentiated failure reason.
+  diagnose: async () => {
+    const startedAt = Date.now()
+    const base = {
+      url: getApiUrl(),
+      locked: isApiUrlLocked(),
+      latencyMs: null,
+      serverTime: null,
+      database: null,
+    }
+    try {
+      const data = await request('/health', { timeoutMs: 8000 })
+      const database = data?.database || null
+      const databaseOk = database?.status === 'connected'
+      return {
+        ...base,
+        latencyMs: Date.now() - startedAt,
+        serverTime: data?.serverTime || null,
+        database,
+        online: databaseOk,
+        category: databaseOk ? 'ok' : 'database',
+        message: databaseOk
+          ? 'Server and database are reachable.'
+          : 'The server answered, but its database is not healthy.',
+      }
+    } catch (error) {
+      const { category, message } = describeConnectionError(error)
+      return { ...base, online: false, httpStatus: error.status || null, category, message }
+    }
+  },
 
   // ---------------- Authentication ----------------
   auth: {
@@ -142,13 +211,9 @@ export const api = {
     fetchEvidence: (token, evidenceId) => fetchEvidence(evidenceId, token),
   },
 
-  // ---------------- Legacy Compatibility ----------------
-  info: () => request('/exam/info', { timeoutMs: 3000 }),
-  start: (userId, name) => request('/exam/start', { method: 'POST', body: { userId, name } }),
-  getAttempt: (token) => request('/exam/attempt', { token }),
-  saveAnswers: (token, answers, flags) => request('/exam/answers', { method: 'PUT', token, body: { answers, flags } }),
-  sendEvents: (token, events) => request('/exam/events', { method: 'POST', token, body: { events } }),
-  submit: (token, answers, flags) => request('/exam/submit', { method: 'POST', token, body: { answers, flags } }),
+  // ---------------- Legacy practical / instructor surface ----------------
+  // The active exam flow is the authenticated /api/student/* API above. These
+  // endpoints back the historic practical-task and instructor tooling only.
   practical: (token) => request('/practical', { token }),
   uploadFile: (token, taskId, name, contentBase64) =>
     request(`/practical/${encodeURIComponent(taskId)}/files`, { method: 'POST', token, body: { name, contentBase64 }, timeoutMs: 30000 }),

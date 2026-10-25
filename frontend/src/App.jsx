@@ -9,6 +9,8 @@ import RecoveryScreen from './components/RecoveryScreen.jsx'
 import { useCamera } from './hooks/useCamera.js'
 import { useExamAttempt } from './hooks/useExamAttempt.js'
 import { useTheme } from './hooks/useTheme.js'
+import { api } from './services/api.js'
+import { HttpError } from './lib/exam.js'
 import Logo from './components/ui/Logo.jsx'
 import Button from './components/ui/Button.jsx'
 import Badge from './components/ui/Badge.jsx'
@@ -115,6 +117,11 @@ function App() {
     }
   })
 
+  // A stored token is only a claim; verify it with the server before showing
+  // any authenticated screen so an expired or revoked session can never leave
+  // the user on a misleading dashboard.
+  const [sessionCheck, setSessionCheck] = useState(() => (token ? 'checking' : 'ready'))
+
   const { theme, cycle } = useTheme()
 
   const handleLoginSuccess = (loggedInUser, userToken) => {
@@ -131,6 +138,7 @@ function App() {
   const handleSignOut = () => {
     setUser(null)
     setToken(null)
+    setSessionCheck('ready')
     try {
       localStorage.removeItem('athena.auth_user')
       localStorage.removeItem('athena.auth_token')
@@ -138,6 +146,28 @@ function App() {
       // ignore
     }
   }
+
+  useEffect(() => {
+    if (!token) return undefined
+    let cancelled = false
+    api.auth.me(token)
+      .then(() => {
+        if (!cancelled) setSessionCheck('ready')
+      })
+      .catch((error) => {
+        if (cancelled) return
+        // 401/403 means the session is gone: sign out instead of pretending.
+        // A network error keeps the session so a brief outage cannot log out.
+        if (error instanceof HttpError && (error.status === 401 || error.status === 403)) {
+          handleSignOut()
+        } else {
+          setSessionCheck('ready')
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token])
 
   return (
     <ToastProvider>
@@ -171,7 +201,11 @@ function App() {
         </header>
 
         <div id="main" className="app-main">
-          {!user ? (
+          {sessionCheck === 'checking' ? (
+            <main className="center-screen">
+              <p className="row muted" role="status"><span className="spinner" aria-hidden="true" />Verifying your session…</p>
+            </main>
+          ) : !user ? (
             <LoginScreen onLoginSuccess={handleLoginSuccess} />
           ) : user.role === 'ADMIN' ? (
             <InstructorDashboard adminUser={user} adminToken={token} onSignOut={handleSignOut} />

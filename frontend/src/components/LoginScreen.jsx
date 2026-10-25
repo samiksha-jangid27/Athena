@@ -17,16 +17,16 @@ export default function LoginScreen({ onLoginSuccess }) {
   // Server diagnostics
   const [showSettings, setShowSettings] = useState(false)
   const [serverUrl, setServerUrl] = useState(getApiUrl())
-  const [serverHealth, setServerHealth] = useState(null)
+  // api.diagnose() returns the effective URL, whether the build pins it, and a
+  // differentiated failure reason (http / timeout / network / database).
+  const [diagnostic, setDiagnostic] = useState(null)
   const [checkingHealth, setCheckingHealth] = useState(false)
+  const urlLocked = api.isApiUrlLocked()
 
   const checkStatus = async () => {
     setCheckingHealth(true)
     try {
-      const data = await api.health()
-      setServerHealth({ ok: true, data })
-    } catch (err) {
-      setServerHealth({ ok: false, error: err.message || 'Cannot reach server' })
+      setDiagnostic(await api.diagnose())
     } finally {
       setCheckingHealth(false)
     }
@@ -34,13 +34,9 @@ export default function LoginScreen({ onLoginSuccess }) {
 
   useEffect(() => {
     let mounted = true
-    api.health()
-      .then((data) => {
-        if (mounted) setServerHealth({ ok: true, data })
-      })
-      .catch((err) => {
-        if (mounted) setServerHealth({ ok: false, error: err.message || 'Cannot reach server' })
-      })
+    api.diagnose().then((result) => {
+      if (mounted) setDiagnostic(result)
+    })
     return () => {
       mounted = false
     }
@@ -144,13 +140,15 @@ export default function LoginScreen({ onLoginSuccess }) {
 
         <div className="login-footer">
           <div className="server-status-pill" onClick={() => setShowSettings(true)}>
-            <span className={`pulse-dot ${serverHealth?.ok ? 'tone-success live' : 'tone-danger'}`} />
+            <span className={`pulse-dot ${diagnostic?.online ? 'tone-success live' : 'tone-danger'}`} />
             <span className="server-label">
               {checkingHealth
                 ? 'Connecting to server…'
-                : serverHealth?.ok
+                : diagnostic?.online
                 ? 'Server connected'
-                : 'Server offline / Wake up'}
+                : diagnostic
+                ? 'Server offline / Wake up'
+                : 'Checking server…'}
             </span>
             <Icon name="settings" size={13} className="settings-icon" />
           </div>
@@ -169,14 +167,25 @@ export default function LoginScreen({ onLoginSuccess }) {
           </Button>
         )}>
         <div className="settings-body">
-          <p className="subtle">
-            Athena connects to a shared hosted backend. In production builds, clients connect securely over HTTPS.
-          </p>
+          {urlLocked ? (
+            <p className="subtle">
+              This packaged build is pinned to the backend it was built for, so the address below cannot
+              be changed here. Copied or modified settings are ignored.
+            </p>
+          ) : (
+            <p className="subtle">
+              Athena connects to a shared hosted backend. In production builds, clients connect securely over HTTPS.
+            </p>
+          )}
           <Field
             label="Backend Server URL"
-            value={serverUrl}
+            value={urlLocked ? getApiUrl() : serverUrl}
+            readOnly={urlLocked}
+            disabled={urlLocked}
             onChange={(e) => setServerUrl(e.target.value)}
-            hint="Default: Central Render backend. You can customize this if your institution uses a private deployment."
+            hint={urlLocked
+              ? 'Locked by this build’s configuration.'
+              : 'Default: Central Render backend. You can customize this if your institution uses a private deployment.'}
           />
           <div className="settings-actions">
             <Button
@@ -201,15 +210,30 @@ export default function LoginScreen({ onLoginSuccess }) {
             </Button>
           </div>
 
+          {diagnostic && (
+            <Callout tone={diagnostic.online ? 'success' : 'danger'} role="status">
+              {diagnostic.message}
+            </Callout>
+          )}
+
           <div className="diag-box">
             <strong>Diagnostic Info:</strong>
             <pre>
               {JSON.stringify(
                 {
-                  activeUrl: getApiUrl(),
-                  status: checkingHealth ? 'checking...' : serverHealth?.ok ? 'ONLINE' : 'UNREACHABLE',
-                  serverTime: serverHealth?.data?.serverTime || null,
-                  database: serverHealth?.data?.database || null,
+                  activeUrl: diagnostic?.url ?? getApiUrl(),
+                  urlLockedByBuild: urlLocked,
+                  status: checkingHealth
+                    ? 'checking…'
+                    : diagnostic?.online
+                    ? 'ONLINE'
+                    : diagnostic
+                    ? `UNREACHABLE (${diagnostic.category})`
+                    : 'UNKNOWN',
+                  latencyMs: diagnostic?.latencyMs ?? null,
+                  httpStatus: diagnostic?.httpStatus ?? null,
+                  serverTime: diagnostic?.serverTime ?? null,
+                  database: diagnostic?.database ?? null,
                 },
                 null,
                 2
