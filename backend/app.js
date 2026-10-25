@@ -18,7 +18,7 @@ const {
   requireStudent,
   hashToken,
 } = require("./lib/auth");
-const { gradeQuestion, gradeAttempt } = require("./lib/grading");
+const { gradeQuestion, gradeAttempt, validateAnswerPayload, validateFlags, validateMcqQuestion } = require("./lib/grading");
 const { saveEvidenceFile, getEvidenceStream } = require("./lib/evidenceStorage");
 const rules = require("./lib/attempts");
 const practical = require("./lib/practical");
@@ -76,6 +76,48 @@ function attemptAnswers(attempt) {
   return { answers, flags };
 }
 
+function safeParse(value, fallback) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+const MAX_EVIDENCE_BYTES = 2 * 1024 * 1024;
+const EVIDENCE_KINDS = new Set(["camera", "screen"]);
+
+// Validates a proctoring evidence upload before it is stored. Returns
+// { status, error } for bad input (always a clear 4xx) or { kind, buffer } on
+// success, so malformed uploads never surface as a 500.
+function parseEvidenceUpload(rawKind, rawBase64) {
+  const kind = typeof rawKind === "string" ? rawKind.trim().toLowerCase() : "";
+  if (!EVIDENCE_KINDS.has(kind)) {
+    return { status: 400, error: "Evidence kind must be 'camera' or 'screen'" };
+  }
+  if (typeof rawBase64 !== "string" || !rawBase64.trim()) {
+    return { status: 400, error: "Base64 image data is required" };
+  }
+  const clean = rawBase64.replace(/^data:image\/[a-z+.-]+;base64,/i, "").replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(clean)) {
+    return { status: 400, error: "Evidence must be valid base64 image data" };
+  }
+  const buffer = Buffer.from(clean, "base64");
+  if (buffer.length === 0) {
+    return { status: 400, error: "Evidence image is empty" };
+  }
+  if (buffer.length > MAX_EVIDENCE_BYTES) {
+    return { status: 413, error: "Evidence file too large" };
+  }
+  // The capture pipeline always produces JPEG; anything else is not an image.
+  if (!(buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff)) {
+    return { status: 400, error: "Evidence must be a JPEG image" };
+  }
+  return { kind, buffer };
+}
+
 function questionForStudent(q) {
   let options = [];
   try {
@@ -92,6 +134,29 @@ function questionForStudent(q) {
     marks: q.marks,
     orderIndex: q.orderIndex,
   };
+}
+
+// One canonical attempt snapshot shared by every student endpoint (start,
+// heartbeat, autosave, events, submit). Sending the same shape everywhere means
+// a partial response can never wipe the client's deadline or server clock.
+function attemptSnapshot(attempt, extra = {}) {
+  const saved = attemptAnswers(attempt);
+  return {
+    sessionId: attempt.sessionId,
+    status: normalizeStatus(attempt.status),
+    deadline: attempt.deadline,
+    serverTime: new Date().toISOString(),
+    submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
+    answers: saved.answers,
+    flags: saved.flags,
+    ...extra,
+  };
+}
+
+// Validates the submitted answer payload against the questions of that exam.
+// Returns a message to send with a 400, or null when the payload is valid.
+function answerPayloadError(questions, answers, flags) {
+  return validateAnswerPayload(questions, answers) || validateFlags(questions, flags);
 }
 
 function createApp(config = {}) {
@@ -412,13 +477,11 @@ function createApp(config = {}) {
       if (!exam) return sendError(res, 404, "Exam not found");
 
       const { type, prompt, options, correctAnswer, marks, orderIndex, explanation } = req.body || {};
-      if (!prompt || !prompt.trim()) return sendError(res, 400, "Question prompt is required");
-      if (correctAnswer === undefined || correctAnswer === null) {
-        return sendError(res, 400, "Correct answer is required");
-      }
+      const invalid = validateMcqQuestion({ type, prompt, options, correctAnswer, marks: marks ?? 1 });
+      if (invalid) return sendError(res, 400, invalid);
 
       const question = await db.questions.create(req.params.id, {
-        type: type || "MCQ",
+        type: "MCQ",
         prompt: prompt.trim(),
         options: options || [],
         correctAnswer,
@@ -445,6 +508,19 @@ function createApp(config = {}) {
     try {
       const q = await db.questions.findById(req.params.id);
       if (!q) return sendError(res, 404, "Question not found");
+
+      // The payload may be partial, so validate the merged result to keep the
+      // stored question a valid four-option MCQ.
+      const storedOptions = typeof q.options === "string" ? safeParse(q.options, []) : q.options;
+      const merged = {
+        type: req.body?.type ?? q.type,
+        prompt: req.body?.prompt ?? q.prompt,
+        options: req.body?.options ?? storedOptions,
+        correctAnswer: req.body?.correctAnswer ?? safeParse(q.correctAnswer, null),
+        marks: req.body?.marks ?? q.marks,
+      };
+      const invalid = validateMcqQuestion(merged);
+      if (invalid) return sendError(res, 400, invalid);
 
       const updated = await db.questions.update(req.params.id, req.body || {});
       res.json({ question: updated });
@@ -834,13 +910,7 @@ function createApp(config = {}) {
           message: "Resuming existing active attempt",
           token,
           sessionId: activeAttempt.sessionId,
-          attempt: {
-            sessionId: activeAttempt.sessionId,
-            status: normalizeStatus(activeAttempt.status),
-            deadline: activeAttempt.deadline,
-            serverTime: new Date().toISOString(),
-            ...saved,
-          },
+          attempt: attemptSnapshot(activeAttempt),
           exam: { id: exam.id, title: exam.title, durationMinutes: exam.durationMinutes, passingCriteria: exam.passingCriteria ?? null },
           questions: questions.map(questionForStudent),
         });
@@ -932,16 +1002,6 @@ function createApp(config = {}) {
       }
 
       const questions = await db.questions.listByExam(attempt.examId);
-      const answersMap = {};
-      const flagsList = [];
-      for (const sa of attempt.submittedAnswers || []) {
-        try {
-          answersMap[sa.questionId] = JSON.parse(sa.answerValue);
-        } catch {
-          answersMap[sa.questionId] = sa.answerValue;
-        }
-        if (sa.isFlagged) flagsList.push(sa.questionId);
-      }
 
       const responseData = {
         exam: {
@@ -950,15 +1010,7 @@ function createApp(config = {}) {
           durationMinutes: attempt.exam?.durationMinutes,
           passingCriteria: attempt.exam?.passingCriteria ?? null,
         },
-        attempt: {
-          sessionId: attempt.sessionId,
-          status: normalizeStatus(attempt.status),
-          deadline: attempt.deadline,
-          serverTime: new Date().toISOString(),
-          submittedAt: attempt.submittedAt || null,
-          answers: answersMap,
-          flags: flagsList,
-        },
+        attempt: attemptSnapshot(attempt),
         questions: questions.map(questionForStudent),
       };
 
@@ -998,14 +1050,16 @@ function createApp(config = {}) {
       }
 
       const { answers = {}, flags = [] } = req.body || {};
+      const examQuestions = await db.questions.listByExam(attempt.examId);
+      const invalid = answerPayloadError(examQuestions, answers, flags);
+      if (invalid) return sendError(res, 400, invalid);
+
       await db.attempts.saveAnswers(attempt.id, answers, flags);
 
+      // Re-read so the snapshot reflects exactly what was persisted.
+      const saved = (await db.attempts.findById(attempt.id)) || attempt;
       res.json({
-        attempt: {
-          sessionId: attempt.sessionId,
-          status: "in-progress",
-          lastSavedAt: new Date().toISOString(),
-        },
+        attempt: attemptSnapshot(saved, { lastSavedAt: new Date().toISOString() }),
       });
     } catch (err) {
       sendError(res, 500, err.message);
@@ -1032,12 +1086,7 @@ function createApp(config = {}) {
 
       // Re-read the attempt so a fullscreen-exit lock is reflected in the response.
       const refreshed = (await db.attempts.findById(attempt.id)) || attempt;
-      res.json({
-        attempt: {
-          sessionId: attempt.sessionId,
-          status: normalizeStatus(refreshed.status),
-        },
-      });
+      res.json({ attempt: attemptSnapshot(refreshed) });
     } catch (err) {
       sendError(res, 500, err.message);
     }
@@ -1052,16 +1101,15 @@ function createApp(config = {}) {
       const attempt = await db.attempts.findByTokenHash(hashToken(rawToken));
       if (!attempt) return sendError(res, 401, "Invalid session token");
 
-      const { kind = "camera", base64 } = req.body || {};
-      if (!base64 || typeof base64 !== "string") {
-        return sendError(res, 400, "Base64 image data is required");
+      // Evidence is only meaningful while the attempt is live; reject uploads
+      // once it has been submitted or has expired.
+      if (attempt.status === "SUBMITTED" || attempt.status === "EXPIRED") {
+        return sendError(res, 409, `Attempt is ${normalizeStatus(attempt.status)}; evidence is closed`);
       }
 
-      const cleanBase64 = base64.replace(/^data:image\/[a-z]+;base64,/, "");
-      const buffer = Buffer.from(cleanBase64, "base64");
-      if (buffer.length > 2 * 1024 * 1024) {
-        return sendError(res, 413, "Evidence file too large");
-      }
+      const parsed = parseEvidenceUpload(req.body?.kind, req.body?.base64);
+      if (parsed.error) return sendError(res, parsed.status, parsed.error);
+      const { kind, buffer } = parsed;
 
       const saved = await saveEvidenceFile({
         sessionId: attempt.sessionId,
@@ -1097,11 +1145,7 @@ function createApp(config = {}) {
         // Bug 7: Idempotent submit returns the already-saved result unchanged
         const gradeQuestions = await db.questions.listByExam(attempt.examId, { includeAnswers: true });
         return res.json({
-          attempt: {
-            sessionId: attempt.sessionId,
-            status: "submitted",
-            submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
-          },
+          attempt: attemptSnapshot(attempt),
           result: resultForAttempt(attempt, gradeQuestions),
         });
       }
@@ -1113,11 +1157,15 @@ function createApp(config = {}) {
 
       const { answers = {}, flags = [] } = req.body || {};
 
-      // Bug 7: Save answers first, then grade from stored answers (atomic)
-      if (attempt.status === "IN_PROGRESS" || attempt.status === "LOCKED") {
+      // Answers are only accepted while the attempt is in progress. A locked or
+      // expired attempt keeps the answers the server already has; an
+      // administrator must unlock it before any change is accepted.
+      if (attempt.status === "IN_PROGRESS") {
+        const examQuestions = await db.questions.listByExam(attempt.examId);
+        const invalid = answerPayloadError(examQuestions, answers, flags);
+        if (invalid) return sendError(res, 400, invalid);
         await db.attempts.saveAnswers(attempt.id, answers, flags);
       }
-      // For expired attempts, use the already-saved answers, don't trust new payload
 
       // Re-read the stored answers to grade exactly what's persisted
       const freshAttempt = await db.attempts.findByTokenHash(hashToken(rawToken));
@@ -1125,11 +1173,7 @@ function createApp(config = {}) {
       if (freshAttempt.status === "SUBMITTED") {
         const gradeQuestions = await db.questions.listByExam(freshAttempt.examId, { includeAnswers: true });
         return res.json({
-          attempt: {
-            sessionId: freshAttempt.sessionId,
-            status: "submitted",
-            submittedAt: freshAttempt.submittedAt ? new Date(freshAttempt.submittedAt).toISOString() : null,
-          },
+          attempt: attemptSnapshot(freshAttempt),
           result: resultForAttempt(freshAttempt, gradeQuestions),
         });
       }
@@ -1159,11 +1203,11 @@ function createApp(config = {}) {
       const answered = Object.keys(storedAnswers.answers).length;
 
       res.json({
-        attempt: {
-          sessionId: attempt.sessionId,
-          status: "submitted",
-          submittedAt: submittedAt.toISOString(),
-        },
+        attempt: attemptSnapshot({
+          ...freshAttempt,
+          status: "SUBMITTED",
+          submittedAt,
+        }),
         result: {
           score: gradingResult.autoScore,
           maxScore: gradingResult.maxPossible,

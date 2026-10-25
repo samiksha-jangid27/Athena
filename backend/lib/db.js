@@ -124,39 +124,46 @@ async function ensureSeed(dbInstance) {
         });
       }
     } else {
-      // Add a set of default questions across multiple types
-      await dbInstance.questions.create(exam.id, {
-        type: "MCQ",
-        prompt: "Which Electron process is responsible for creating BrowserWindow instances?",
-        options: ["Renderer Process", "Main Process", "Utility Process", "Preload Process"],
-        correctAnswer: 1,
-        marks: 25,
-        orderIndex: 1,
-      });
-      await dbInstance.questions.create(exam.id, {
-        type: "MSQ",
-        prompt: "Which of the following are secure Electron webPreferences settings?",
-        options: ["contextIsolation: true", "nodeIntegration: true", "sandbox: true", "webSecurity: false"],
-        correctAnswer: [0, 2],
-        marks: 25,
-        orderIndex: 2,
-      });
-      await dbInstance.questions.create(exam.id, {
-        type: "TRUE_FALSE",
-        prompt: "In Electron, preload scripts run with access to both Node.js and DOM by default when contextIsolation is enabled.",
-        options: ["True", "False"],
-        correctAnswer: 1,
-        marks: 25,
-        orderIndex: 3,
-      });
-      await dbInstance.questions.create(exam.id, {
-        type: "SHORT_ANSWER",
-        prompt: "Explain how IPC communication is secured between renderer and main processes.",
-        options: [],
-        correctAnswer: "Use contextBridge in preload script with explicit channels and validate all inputs in ipcMain handlers.",
-        marks: 25,
-        orderIndex: 4,
-      });
+      // Fallback seed: the product is multiple-choice only, so every default
+      // question is a single-answer MCQ with four options.
+      const defaultMcqs = [
+        {
+          prompt: "Which Electron process is responsible for creating BrowserWindow instances?",
+          options: ["Renderer Process", "Main Process", "Utility Process", "Preload Process"],
+          correctAnswer: 1,
+        },
+        {
+          prompt: "Which API lets the renderer call a handler in the main process?",
+          options: ["ipcRenderer.invoke", "BrowserWindow.loadURL", "fs.writeFileSync", "dialog.showMessageBox"],
+          correctAnswer: 0,
+        },
+        {
+          prompt: "Why is a preload script used in Electron?",
+          options: [
+            "To style the application",
+            "To expose controlled APIs safely to the renderer",
+            "To create the Express server",
+            "To replace the main process",
+          ],
+          correctAnswer: 1,
+        },
+        {
+          prompt: "Which setting keeps renderer contexts isolated from each other?",
+          options: ["nodeIntegration: true", "contextIsolation: true", "webSecurity: false", "sandbox: false"],
+          correctAnswer: 1,
+        },
+      ];
+      for (let i = 0; i < defaultMcqs.length; i++) {
+        const q = defaultMcqs[i];
+        await dbInstance.questions.create(exam.id, {
+          type: "MCQ",
+          prompt: q.prompt,
+          options: q.options,
+          correctAnswer: q.correctAnswer,
+          marks: 25,
+          orderIndex: i + 1,
+        });
+      }
     }
   }
 }
@@ -577,11 +584,17 @@ const db = {
           include: { submittedAnswers: true, extensions: true },
         });
       }
-      return (
-        memoryStore.attempts.find(
-          (a) => a.userId === userId && a.examId === examId && (a.status === "IN_PROGRESS" || a.status === "LOCKED")
-        ) || null
+      const attempt = memoryStore.attempts.find(
+        (a) => a.userId === userId && a.examId === examId && (a.status === "IN_PROGRESS" || a.status === "LOCKED")
       );
+      if (!attempt) return null;
+      // Mirror the Prisma shape (submittedAnswers/extensions) so callers can rely
+      // on the same fields regardless of which storage backend is active.
+      return {
+        ...attempt,
+        submittedAnswers: memoryStore.submittedAnswers.filter((sa) => sa.attemptId === attempt.id),
+        extensions: memoryStore.extensions.filter((ex) => ex.attemptId === attempt.id),
+      };
     },
 
     // Returns the most recent attempt for a student & exam regardless of status.
@@ -873,16 +886,25 @@ const db = {
                 detail: ev.detail ? String(ev.detail).slice(0, 500) : null,
               },
             });
-            if (ev.type === "fullscreen-exit") locked = true;
-          } catch {
-            // Ignore duplicate eventId
+          } catch (error) {
+            // A retried event collides on the unique eventId. Anything else is a
+            // real database failure and must surface instead of being hidden.
+            if (error.code !== "P2002") throw error;
           }
+          if (ev.type === "fullscreen-exit") locked = true;
         }
         if (locked) {
-          await prismaClient.attempt.update({
+          // A finished attempt must never be revived into LOCKED by a late event.
+          const current = await prismaClient.attempt.findUnique({
             where: { id: attemptId },
-            data: { status: "LOCKED" },
+            select: { status: true },
           });
+          if (current && (current.status === "IN_PROGRESS" || current.status === "LOCKED")) {
+            await prismaClient.attempt.update({
+              where: { id: attemptId },
+              data: { status: "LOCKED" },
+            });
+          }
         }
         return;
       }
