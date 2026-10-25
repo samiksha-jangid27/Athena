@@ -129,3 +129,13 @@ test("disallowed app detection is recorded with critical severity", () => {
   assert.equal(attempt.events[0].severity, "critical");
   assert.equal(attempt.events[0].detail, "Detected: Discord");
 });
+
+test("blocked in-app shortcuts are accepted as warning activity", () => {
+  const attempt = newAttempt();
+  assert.equal(
+    rules.recordEvents(attempt, [{ id: "shortcut-1", type: "prohibited-shortcut-blocked", detail: "Blocked shortcut: F12" }], START),
+    null
+  );
+  assert.equal(attempt.events[0].severity, "warning");
+  assert.equal(attempt.status, "in-progress");
+});
