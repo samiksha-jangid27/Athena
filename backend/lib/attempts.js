@@ -24,6 +24,7 @@ const EVENT_TYPES = new Set([
   "network-online",
   "answers-recovered",
   "disallowed-app-detected",
+  "prohibited-shortcut-blocked",
 ]);
 
 // How serious each event is, for the instructor timeline.
@@ -35,6 +36,7 @@ const SEVERITY = {
   "window-blur": "warning",
   "network-offline": "warning",
   "answers-recovered": "warning",
+  "prohibited-shortcut-blocked": "warning",
 };
 
 function severityOf(type) {
