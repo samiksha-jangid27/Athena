@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../services/api.js'
 import {
-  canAnswer, clearLocal, examPhase, isRejection, loadLocal, makeEvent, mergeRecovered, remainingMs, saveLocal, withRetry,
+  HttpError, canAnswer, clearLocal, examPhase, isRejection, loadLocal, makeEvent, mergeRecovered, remainingMs, saveLocal, withRetry,
 } from '../lib/exam.js'
 
 const HEARTBEAT_MS = 10000
@@ -14,6 +14,7 @@ export function useExamAttempt() {
   const [attempt, setAttempt] = useState(null) // { status, deadline, ... } from server
   const [questions, setQuestions] = useState([])
   const [examTitle, setExamTitle] = useState('')
+  const [examInfo, setExamInfo] = useState(null)
   const [answers, setAnswers] = useState({})
   const [flags, setFlags] = useState([])
   const [serverOffset, setServerOffset] = useState(0)
@@ -186,9 +187,12 @@ export function useExamAttempt() {
     setToken(newToken)
     setQuestions(data.questions)
     setExamTitle(data.exam?.title || 'Exam')
+    setExamInfo(data.exam || null)
     setAnswers(merged.answers)
     setFlags(merged.flags)
-    setResult(null)
+    // A submitted attempt comes back with its stored result, so a refresh or
+    // restart lands on the result screen instead of reopening the quiz.
+    setResult(data.result || null)
     setPendingLock(false)
     setSaveState(merged.recovered ? 'saving' : 'saved')
     setEventState({ pending: eventsRef.current.length, rejected: 0 })
@@ -273,9 +277,29 @@ export function useExamAttempt() {
       setResult(data.result)
       clearLocal()
       return true
-    } catch {
+    } catch (error) {
       submittingRef.current = false
-      setSubmitError('Could not reach the exam service. Your answers are saved on this device. Try again.')
+      // If the server already considers this attempt submitted (e.g. a retry
+      // after the first request succeeded), load and show the saved result.
+      if (error instanceof HttpError && error.status === 409) {
+        try {
+          const data = await api.getAttempt(currentToken)
+          if (data?.attempt?.status === 'submitted') {
+            applyServer(data.attempt)
+            setResult(data.result || { status: 'submitted' })
+            clearLocal()
+            return true
+          }
+        } catch {
+          // Fall through to the real error message below.
+        }
+      }
+      // Surface the actual server error instead of a generic message.
+      setSubmitError(
+        error instanceof HttpError
+          ? error.body?.message || error.message
+          : 'Could not reach the exam service. Your answers are saved on this device. Try again.',
+      )
       return false
     } finally {
       setSubmitting(false)
@@ -308,7 +332,7 @@ export function useExamAttempt() {
   }, [])
 
   return {
-    phase, token, attempt, questions, examTitle, answers, flags, remaining, answerable,
+    phase, token, attempt, questions, examTitle, examInfo, answers, flags, remaining, answerable,
     pendingLock, lockedAt, saveState, lastSavedAt, eventState, result, submitting, submitError,
     extensionNotice, clearExtensionNotice: () => setExtensionNotice(null),
     begin, recover, chooseAnswer, toggleFlag, logEvent, submit, reset,

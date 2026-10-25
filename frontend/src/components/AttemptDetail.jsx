@@ -7,7 +7,6 @@ import Button from './ui/Button.jsx'
 import Field from './ui/Field.jsx'
 import Modal from './ui/Modal.jsx'
 import { useToast } from './ui/Toast.jsx'
-import PracticalReview from './PracticalReview.jsx'
 
 function time(value) {
   return value ? new Date(value).toLocaleTimeString() : '—'
@@ -166,7 +165,7 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
       <dl className="detail-facts">
         <div><dt>Status</dt><dd className="num">{status}</dd></div>
         <div><dt>Time left</dt><dd className="num">{remaining === null ? '—' : formatDuration(remaining)}</dd></div>
-        <div><dt>Total score</dt><dd className="num" style={{ fontWeight: 700, color: 'var(--accent)' }}>{attempt.totalScore ?? attempt.correct ?? 0}</dd></div>
+        <div><dt>Score</dt><dd className="num" style={{ fontWeight: 700, color: 'var(--accent)' }}>{attempt.maxScore ? `${attempt.totalScore ?? 0} / ${attempt.maxScore}` : (attempt.totalScore ?? 0)}</dd></div>
         <div><dt>Started</dt><dd className="num">{time(attempt.startedAt)}</dd></div>
         <div><dt>Deadline</dt><dd className="num">{time(attempt.deadline)}</dd></div>
         <div><dt>Submitted</dt><dd className="num">{time(attempt.submittedAt)}</dd></div>
@@ -211,7 +210,7 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
               <strong style={{ display: 'block' }}>{attempt.autoScore || attempt.correct || 0} pts</strong>
             </div>
             <Field
-              label="Manual Score (Short Answer):"
+              label="Manual Score Adjustment:"
               type="number"
               value={manualMarks}
               onChange={(e) => setManualMarks(e.target.value)}
@@ -279,8 +278,6 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
           onLoadEarlier={() => setEvidenceLimit((current) => current + 24)}
         />
       </section>
-
-      <PracticalReview attempt={attempt} instructorKey={instructorKey} />
 
       <Modal open={confirm !== null} onClose={() => !busy && setConfirm(null)}
         title={confirm === 'unlock' ? 'Unlock this attempt?' : `Add ${minutes} minutes?`}

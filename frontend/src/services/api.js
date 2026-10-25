@@ -67,6 +67,17 @@ async function fetchEvidence(evidenceId, token) {
   return response.blob()
 }
 
+async function fetchResultsCsv(examId, token) {
+  const response = await fetch(`${getApiUrl().replace(/\/+$/, '')}/api/admin/exams/${encodeURIComponent(examId)}/export`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}))
+    throw new HttpError(response.status, body)
+  }
+  return response.blob()
+}
+
 export const api = {
   getApiUrl,
   setApiUrl,
@@ -132,7 +143,7 @@ export const api = {
       request(`/api/admin/attempts/${encodeURIComponent(id)}/extend`, { method: 'POST', token, body: { minutes } }),
     gradeAttempt: (token, id, data) =>
       request(`/api/admin/attempts/${encodeURIComponent(id)}/grade`, { method: 'PUT', token, body: data }),
-    exportUrl: (id) => `${getApiUrl().replace(/\/+$/, '')}/api/admin/exams/${encodeURIComponent(id)}/export`,
+    exportCsv: (token, id) => fetchResultsCsv(id, token),
     fetchEvidence: (token, evidenceId) => fetchEvidence(evidenceId, token),
   },
 

@@ -215,6 +215,23 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
     }
   }
 
+  // Export authenticated CSV results for an exam.
+  const handleExportCsv = async (exam) => {
+    try {
+      const blob = await api.admin.exportCsv(adminToken, exam.id)
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `exam-results-${exam.id}.csv`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      notify(err.message || 'Failed to export CSV results', 'error')
+    }
+  }
+
   // Open Question Manager for Exam
   const openQuestionManager = async (exam) => {
     setSelectedExamForQuestions(exam)
@@ -478,7 +495,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                           </td>
                           <td className="num">{att.attempted ?? (att.answers ? Object.keys(att.answers).length : 0)}</td>
                           <td className="num" style={{ fontWeight: 650 }}>
-                            {att.totalScore ?? att.correct ?? '—'}
+                            {att.totalScore == null ? '—' : (att.maxScore ? `${att.totalScore} / ${att.maxScore}` : att.totalScore)}
                           </td>
                           <td className="num subtle">
                             {new Date(lastActivity(att)).toLocaleTimeString()}
@@ -569,13 +586,13 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                             onClick={() => handleTogglePublish(exam)}>
                             {exam.status === 'PUBLISHED' ? 'Unpublish' : 'Publish'}
                           </Button>
-                          <a
-                            href={api.admin.exportUrl(exam.id)}
-                            download
-                            className="btn btn-sm btn-secondary"
-                            style={{ textDecoration: 'none' }}>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            icon="file"
+                            onClick={() => handleExportCsv(exam)}>
                             CSV Results
-                          </a>
+                          </Button>
                         </div>
                       </td>
                     </tr>

@@ -57,6 +57,7 @@ function StudentApp({ user, token, onSignOut }) {
       <ResultScreen
         result={exam.result}
         attempt={exam.attempt}
+        exam={exam.examInfo}
         onDone={() => {
           exam.reset()
           setSelectedExam(null)

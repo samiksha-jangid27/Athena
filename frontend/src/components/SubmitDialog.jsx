@@ -12,7 +12,7 @@ function QuestionLinks({ indices, onJump }) {
   )
 }
 
-export default function SubmitDialog({ open, summary, practicalFiles, submitting, error, onCancel, onConfirm, onJump }) {
+export default function SubmitDialog({ open, summary, submitting, error, onCancel, onConfirm, onJump }) {
   return (
     <Modal open={open} title="Submit your exam?" onClose={onCancel}
       footer={(
@@ -24,7 +24,6 @@ export default function SubmitDialog({ open, summary, practicalFiles, submitting
       <dl className="summary-list">
         <div><dt>Answered</dt><dd className="num">{summary.answered} of {summary.total}</dd></div>
         <div><dt>Not answered</dt><dd>{summary.unanswered.length ? <QuestionLinks indices={summary.unanswered} onJump={onJump} /> : 'None'}</dd></div>
-        {practicalFiles !== null && <div><dt>Practical files uploaded</dt><dd className="num">{practicalFiles}</dd></div>}
         <div><dt>Flagged for review</dt><dd>{summary.flagged.length ? <QuestionLinks indices={summary.flagged} onJump={onJump} /> : 'None'}</dd></div>
       </dl>
       <p>After you submit, you cannot change your answers.</p>

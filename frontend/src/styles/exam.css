@@ -105,6 +105,10 @@
 .receipt div { display: flex; justify-content: space-between; gap: var(--space-4); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); font-size: var(--text-sm); }
 .receipt dt { color: var(--text-muted); }
 .receipt dd { margin: 0; font-weight: 600; }
+.result-score { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; margin: var(--space-2) 0; }
+.result-score-value { margin: 0; font-size: var(--text-xl); }
+.result-score-value strong { color: var(--accent); }
+.result-score-percent { margin: 0; font-size: var(--text-lg); color: var(--text-muted); }
 
 /* Section tabs and practical workspace */
 .view-tabs { display: flex; border-bottom: 1px solid var(--border); margin: calc(var(--space-2) * -1) 0 0; }

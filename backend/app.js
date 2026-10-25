@@ -28,6 +28,35 @@ function sendError(res, status, message, extra = {}) {
   return res.status(status).json({ message, ...extra });
 }
 
+// Converts DB enum statuses (IN_PROGRESS, SUBMITTED, ...) into the dashed
+// form the frontend expects (in-progress, submitted, ...). Used everywhere a
+// status crosses the API boundary so the client never sees a raw enum.
+function normalizeStatus(status) {
+  return String(status || "").toLowerCase().replace(/_/g, "-");
+}
+
+// Builds a single, consistent result payload for a submitted attempt.
+// Score/maxScore are read from the persisted attempt so every consumer
+// (student result screen, admin dashboard, attempt details, CSV) agrees.
+function resultForAttempt(attempt, questions) {
+  const saved = attemptAnswers(attempt);
+  const answered = Object.keys(saved.answers).length;
+  const graded = gradeAttempt(questions, saved.answers);
+  let correct = 0;
+  for (const item of graded.gradedItems || []) {
+    if (item.isCorrect === true) correct += 1;
+  }
+  return {
+    score: attempt.totalScore != null ? attempt.totalScore : graded.autoScore,
+    maxScore: attempt.maxScore != null ? attempt.maxScore : graded.maxPossible,
+    attempted: answered,
+    correct,
+    hasManualPending: !attempt.isReviewed,
+    submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
+    status: "submitted",
+  };
+}
+
 function attemptTokenForSession(sessionId) {
   const secret = process.env.ATHENA_ATTEMPT_TOKEN_SECRET || process.env.ATHENA_JWT_SECRET || "athena-dev-attempt-token";
   return crypto.createHmac("sha256", secret).update(sessionId).digest("hex");
@@ -79,20 +108,30 @@ function createApp(config = {}) {
   const app = express();
 
   // CORS configuration
-  const allowedOrigins = [
+  // The desktop client runs from a file:// origin (sent as "null") and from
+  // the Vite dev server on localhost during development. Extra origins can be
+  // allowed explicitly through ATHENA_ALLOWED_ORIGINS (comma separated).
+  const allowedOrigins = new Set([
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
     "null",
-  ];
+    ...(process.env.ATHENA_ALLOWED_ORIGINS || "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ]);
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin) || origin.startsWith("http://localhost")) {
-          callback(null, true);
-        } else {
-          callback(null, true); // Allow configured clients in production
+        // No Origin header (curl, health checks, server-to-server) or an
+        // explicitly allowed origin is accepted; everything else is rejected.
+        if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+          return callback(null, true);
         }
+        return callback(null, false);
       },
       credentials: true,
       allowedHeaders: ["Content-Type", "Authorization", "x-athena-bootstrap-secret", "x-athena-start-id"],
@@ -626,19 +665,27 @@ function createApp(config = {}) {
       if (!exam) return sendError(res, 404, "Exam not found");
       const attempts = await db.attempts.listByExam(req.params.id);
 
-      const headers = ["Session ID", "Student ID", "Student Name", "Status", "Started At", "Submitted At", "Auto Score", "Manual Score", "Total Score", "Reviewed"];
-      const rows = attempts.map((a) => [
-        `"${a.sessionId}"`,
-        `"${a.user?.username || a.userId}"`,
-        `"${a.name.replace(/"/g, '""')}"`,
-        `"${a.status}"`,
-        `"${a.startedAt ? new Date(a.startedAt).toISOString() : ""}"`,
-        `"${a.submittedAt ? new Date(a.submittedAt).toISOString() : ""}"`,
-        a.autoScore || 0,
-        a.manualScore || 0,
-        a.totalScore || 0,
-        a.isReviewed ? "Yes" : "No",
-      ]);
+      const headers = ["Session ID", "Student ID", "Student Name", "Status", "Started At", "Submitted At", "Score", "Max Score", "Percentage", "Auto Score", "Manual Score", "Total Score", "Reviewed"];
+      const rows = attempts.map((a) => {
+        const maxScore = a.maxScore != null ? a.maxScore : "";
+        const totalScore = a.totalScore || 0;
+        const percentage = a.maxScore ? Math.round((totalScore / a.maxScore) * 100) : "";
+        return [
+          `"${a.sessionId}"`,
+          `"${a.user?.username || a.userId}"`,
+          `"${a.name.replace(/"/g, '""')}"`,
+          `"${normalizeStatus(a.status)}"`,
+          `"${a.startedAt ? new Date(a.startedAt).toISOString() : ""}"`,
+          `"${a.submittedAt ? new Date(a.submittedAt).toISOString() : ""}"`,
+          totalScore,
+          maxScore,
+          percentage === "" ? "" : `${percentage}%`,
+          a.autoScore || 0,
+          a.manualScore || 0,
+          totalScore,
+          a.isReviewed ? "Yes" : "No",
+        ];
+      });
 
       const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
       res.setHeader("Content-Type", "text/csv");
@@ -685,6 +732,7 @@ function createApp(config = {}) {
           description: e.description,
           durationMinutes: e.durationMinutes,
           questionCount: e._count?.questions || 0,
+          passingCriteria: e.passingCriteria ?? null,
         };
         if (myAttempt) {
           info.attemptStatus = normalizeStatus(myAttempt.status);
@@ -793,21 +841,48 @@ function createApp(config = {}) {
             serverTime: new Date().toISOString(),
             ...saved,
           },
-          exam: { id: exam.id, title: exam.title, durationMinutes: exam.durationMinutes },
+          exam: { id: exam.id, title: exam.title, durationMinutes: exam.durationMinutes, passingCriteria: exam.passingCriteria ?? null },
           questions: questions.map(questionForStudent),
         });
       }
 
       const sessionId = deterministicSessionId || `session-${Date.now()}-${crypto.randomBytes(3).toString("hex")}`;
       const token = attemptTokenForSession(sessionId);
-      const attempt = await db.attempts.create({
-        sessionId,
-        tokenHash: hashToken(token),
-        examId: exam.id,
-        userId: req.user.id,
-        name: req.user.name,
-        durationMinutes: exam.durationMinutes,
-      });
+      let attempt;
+      try {
+        attempt = await db.attempts.create({
+          sessionId,
+          tokenHash: hashToken(token),
+          examId: exam.id,
+          userId: req.user.id,
+          name: req.user.name,
+          durationMinutes: exam.durationMinutes,
+        });
+      } catch (createErr) {
+        // A concurrent or retried start request may have created this exact
+        // deterministic session first. Return the existing attempt (resume)
+        // instead of creating a duplicate or failing.
+        const concurrent = await db.attempts.findBySessionId(sessionId);
+        if (concurrent && concurrent.userId === req.user.id) {
+          const resumeQuestions = await db.questions.listByExam(exam.id);
+          const saved = attemptAnswers(concurrent);
+          return res.json({
+            message: "Resuming existing active attempt",
+            token,
+            sessionId: concurrent.sessionId,
+            attempt: {
+              sessionId: concurrent.sessionId,
+              status: normalizeStatus(concurrent.status),
+              deadline: concurrent.deadline,
+              serverTime: new Date().toISOString(),
+              ...saved,
+            },
+            exam: { id: exam.id, title: exam.title, durationMinutes: exam.durationMinutes, passingCriteria: exam.passingCriteria ?? null },
+            questions: resumeQuestions.map(questionForStudent),
+          });
+        }
+        throw createErr;
+      }
 
       const questions = await db.questions.listByExam(exam.id);
 
@@ -829,7 +904,7 @@ function createApp(config = {}) {
           answers: {},
           flags: [],
         },
-        exam: { id: exam.id, title: exam.title, durationMinutes: exam.durationMinutes },
+        exam: { id: exam.id, title: exam.title, durationMinutes: exam.durationMinutes, passingCriteria: exam.passingCriteria ?? null },
         questions: questions.map(questionForStudent),
       });
     } catch (err) {
@@ -869,7 +944,12 @@ function createApp(config = {}) {
       }
 
       const responseData = {
-        exam: { id: attempt.examId, title: attempt.exam?.title },
+        exam: {
+          id: attempt.examId,
+          title: attempt.exam?.title,
+          durationMinutes: attempt.exam?.durationMinutes,
+          passingCriteria: attempt.exam?.passingCriteria ?? null,
+        },
         attempt: {
           sessionId: attempt.sessionId,
           status: normalizeStatus(attempt.status),
@@ -882,18 +962,11 @@ function createApp(config = {}) {
         questions: questions.map(questionForStudent),
       };
 
-      // Bug 8: Include stored result for submitted attempts
+      // Submitted (or finalized) attempts always return the stored result so a
+      // refreshed app lands straight on the result screen instead of the quiz.
       if (attempt.status === "SUBMITTED") {
-        const answered = Object.keys(answersMap).length;
-        responseData.result = {
-          score: attempt.totalScore,
-          maxScore: attempt.maxScore || null,
-          attempted: answered,
-          correct: attempt.autoScore, // approximation; exact count stored in graded items
-          hasManualPending: !attempt.isReviewed,
-          submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
-          status: "submitted",
-        };
+        const gradeQuestions = await db.questions.listByExam(attempt.examId, { includeAnswers: true });
+        responseData.result = resultForAttempt(attempt, gradeQuestions);
       }
 
       res.json(responseData);
@@ -957,7 +1030,8 @@ function createApp(config = {}) {
         await db.attempts.recordEvents(attempt.id, events);
       }
 
-      const refreshed = await db.attempts.findById ? await db.attempts.findBySessionId(attempt.sessionId) : attempt;
+      // Re-read the attempt so a fullscreen-exit lock is reflected in the response.
+      const refreshed = (await db.attempts.findById(attempt.id)) || attempt;
       res.json({
         attempt: {
           sessionId: attempt.sessionId,
@@ -1020,24 +1094,15 @@ function createApp(config = {}) {
       if (!attempt) return sendError(res, 401, "Invalid session token");
 
       if (attempt.status === "SUBMITTED") {
-        // Bug 7: Idempotent submit returns full stored result
-        const savedAnswers = attemptAnswers(attempt);
-        const answered = Object.keys(savedAnswers.answers).length;
+        // Bug 7: Idempotent submit returns the already-saved result unchanged
+        const gradeQuestions = await db.questions.listByExam(attempt.examId, { includeAnswers: true });
         return res.json({
           attempt: {
             sessionId: attempt.sessionId,
             status: "submitted",
             submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
           },
-          result: {
-            score: attempt.totalScore,
-            maxScore: attempt.maxScore || null,
-            attempted: answered,
-            correct: attempt.autoScore,
-            hasManualPending: !attempt.isReviewed,
-            submittedAt: attempt.submittedAt ? new Date(attempt.submittedAt).toISOString() : null,
-            status: "submitted",
-          },
+          result: resultForAttempt(attempt, gradeQuestions),
         });
       }
 
@@ -1058,23 +1123,14 @@ function createApp(config = {}) {
       const freshAttempt = await db.attempts.findByTokenHash(hashToken(rawToken));
       // Double-check: if someone else already submitted while we were processing
       if (freshAttempt.status === "SUBMITTED") {
-        const savedAnswers = attemptAnswers(freshAttempt);
-        const answered = Object.keys(savedAnswers.answers).length;
+        const gradeQuestions = await db.questions.listByExam(freshAttempt.examId, { includeAnswers: true });
         return res.json({
           attempt: {
             sessionId: freshAttempt.sessionId,
             status: "submitted",
             submittedAt: freshAttempt.submittedAt ? new Date(freshAttempt.submittedAt).toISOString() : null,
           },
-          result: {
-            score: freshAttempt.totalScore,
-            maxScore: freshAttempt.maxScore || null,
-            attempted: answered,
-            correct: freshAttempt.autoScore,
-            hasManualPending: !freshAttempt.isReviewed,
-            submittedAt: freshAttempt.submittedAt ? new Date(freshAttempt.submittedAt).toISOString() : null,
-            status: "submitted",
-          },
+          result: resultForAttempt(freshAttempt, gradeQuestions),
         });
       }
 

@@ -7,8 +7,6 @@ import Icon from './ui/Icon.jsx'
 import Callout from './ui/Callout.jsx'
 import LockedPanel from './LockedPanel.jsx'
 import SubmitDialog from './SubmitDialog.jsx'
-import PracticalTask from './PracticalTask.jsx'
-import { usePractical } from '../hooks/usePractical.js'
 
 function Indicator({ ok, label }) {
   return <div className={`status-line ${ok ? 'ok' : 'bad'}`}><Icon name={ok ? 'check' : 'alert'} size={14} />{label}</div>
@@ -19,9 +17,6 @@ const FILTERS = [['all', 'All'], ['unanswered', 'Unanswered'], ['flagged', 'Flag
 export default function ExamScreen({ exam, camera, athena }) {
   const [current, setCurrent] = useState(0)
   const [filter, setFilter] = useState('all')
-  const [view, setView] = useState('questions') // questions | practical
-  const practical = usePractical(exam.token)
-  const practicalTask = practical.tasks?.[0]
   const [confirming, setConfirming] = useState(false)
   const [screenOk, setScreenOk] = useState(null)
   const [online, setOnline] = useState(navigator.onLine)
@@ -224,14 +219,6 @@ export default function ExamScreen({ exam, camera, athena }) {
 
       <div className="exam-body">
         <aside className="navigator" aria-label="Questions">
-          {practicalTask && (
-            <div className="view-tabs" role="tablist" aria-label="Exam sections">
-              <button type="button" role="tab" aria-selected={view === 'questions'} onClick={() => setView('questions')}>Questions</button>
-              <button type="button" role="tab" aria-selected={view === 'practical'} onClick={() => setView('practical')}>
-                Practical <span className="subtle num">{practicalTask.files.length}</span>
-              </button>
-            </div>
-          )}
           <div className="segmented" role="group" aria-label="Filter questions">
             {FILTERS.map(([value, label]) => (
               <button key={value} type="button" aria-pressed={filter === value} onClick={() => setFilter(value)}>
@@ -243,7 +230,7 @@ export default function ExamScreen({ exam, camera, athena }) {
           </div>
           <div className="question-grid">
             {visible.map(({ question: item, index, answered, flagged }) => (
-              <button key={item.id} type="button" onClick={() => { setView('questions'); setCurrent(index) }}
+              <button key={item.id} type="button" onClick={() => setCurrent(index)}
                 className={`q-chip ${index === current ? 'current' : ''} ${answered ? 'answered' : ''} ${flagged ? 'flagged' : ''}`}
                 aria-current={index === current ? 'true' : undefined}
                 aria-label={`Question ${index + 1}${answered ? ', answered' : ', not answered'}${flagged ? ', flagged' : ''}`}>
@@ -298,14 +285,12 @@ export default function ExamScreen({ exam, camera, athena }) {
               <p className="subtle">Running prohibited applications during an examination violates integrity policies and has been recorded on your activity timeline.</p>
             </Callout>
           )}
-          {!locked && view === 'practical' && practicalTask ? <PracticalTask task={practicalTask} practical={practical} canEdit={canEdit} /> : locked ? <LockedPanel confirmed={attempt?.status === 'locked'} isFullscreen={isFullscreen} lockedAt={exam.lockedAt} /> : (
+          {locked ? <LockedPanel confirmed={attempt?.status === 'locked'} isFullscreen={isFullscreen} lockedAt={exam.lockedAt} /> : (
           <article className="question-card" aria-labelledby="question-text">
             <div className="question-meta">
               <div className="row" style={{ gap: '8px', alignItems: 'center' }}>
                 <span className="eyebrow">Question {current + 1} of {questions.length}</span>
-                {question?.type === 'MSQ' && <span className="badge badge-accent">Multiple Select</span>}
-                {question?.type === 'TRUE_FALSE' && <span className="badge badge-info">True / False</span>}
-                {question?.type === 'SHORT_ANSWER' && <span className="badge badge-warning">Short Answer</span>}
+                <span className="badge badge-accent">Multiple Choice</span>
                 {question?.marks !== undefined && <span className="badge">{question.marks} marks</span>}
               </div>
               <Button variant={flags.includes(question?.id) ? 'secondary' : 'ghost'} size="sm" icon="flag"
@@ -316,74 +301,32 @@ export default function ExamScreen({ exam, camera, athena }) {
             </div>
             <h1 id="question-text" className="question-text">{question?.question}</h1>
 
-            {question?.type === 'SHORT_ANSWER' ? (
-              <div className="short-answer-wrap">
-                <label htmlFor={`sa-${question.id}`} className="field-hint" style={{ fontWeight: 600, display: 'block', marginBottom: '8px' }}>
-                  Write your answer below:
-                </label>
-                <textarea
-                  id={`sa-${question.id}`}
-                  disabled={!canEdit}
-                  rows={5}
-                  className="short-answer-input"
-                  placeholder="Type your response here..."
-                  value={answers[question.id] || ''}
-                  onChange={(e) => exam.chooseAnswer(question.id, e.target.value)}
-                />
-                <span className="field-hint" style={{ marginTop: '4px', display: 'block', textAlign: 'right' }}>
-                  {(answers[question.id] || '').length} characters
-                </span>
-              </div>
-            ) : question?.type === 'MSQ' ? (
-              <div className="options" role="group" aria-labelledby="question-text">
-                {question?.options?.map((option, index) => {
-                  const currentSel = Array.isArray(answers[question.id]) ? answers[question.id] : []
-                  const selected = currentSel.includes(index)
-                  return (
-                    <button key={option} type="button" role="checkbox" aria-checked={selected} disabled={!canEdit}
-                      onClick={() => {
-                        const updated = selected ? currentSel.filter((i) => i !== index) : [...currentSel, index].sort()
-                        exam.chooseAnswer(question.id, updated)
-                      }}
-                      className={`option ${selected ? 'selected' : ''}`}>
-                      <span className="option-key">{selected ? '✓' : index + 1}</span>
-                      <span className="option-text">{option}</span>
-                      {selected && <Icon name="check" size={16} />}
-                    </button>
-                  )
-                })}
-              </div>
-            ) : (
-              <div className="options" role="radiogroup" aria-labelledby="question-text">
-                {question?.options?.map((option, index) => {
-                  const selected = answers[question.id] === index
-                  return (
-                    <button key={option} type="button" role="radio" aria-checked={selected} disabled={!canEdit}
-                      onClick={() => exam.chooseAnswer(question.id, index)} className={`option ${selected ? 'selected' : ''}`}>
-                      <span className="option-key">{index + 1}</span>
-                      <span className="option-text">{option}</span>
-                      {selected && <Icon name="check" size={16} />}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
+            <div className="options" role="radiogroup" aria-labelledby="question-text">
+              {question?.options?.map((option, index) => {
+                const selected = answers[question.id] === index
+                return (
+                  <button key={option} type="button" role="radio" aria-checked={selected} disabled={!canEdit}
+                    onClick={() => exam.chooseAnswer(question.id, index)} className={`option ${selected ? 'selected' : ''}`}>
+                    <span className="option-key">{index + 1}</span>
+                    <span className="option-text">{option}</span>
+                    {selected && <Icon name="check" size={16} />}
+                  </button>
+                )
+              })}
+            </div>
           </article>
           )}
 
-          <nav className="question-nav" aria-label="Question navigation" hidden={view === 'practical'}>
+          <nav className="question-nav" aria-label="Question navigation">
             <Button variant="secondary" icon="arrowLeft" disabled={current === 0} onClick={() => setCurrent(current - 1)}>Previous</Button>
             {isLast
               ? <Button iconRight="arrowRight" disabled={exam.submitting} onClick={() => setConfirming(true)}>Review and submit</Button>
               : <Button iconRight="arrowRight" onClick={() => setCurrent(current + 1)}>Next</Button>}
           </nav>
 
-          {view === 'practical' && (
-            <nav className="question-nav"><span /><Button iconRight="arrowRight" onClick={() => setConfirming(true)}>Review and submit</Button></nav>
-          )}
-          <SubmitDialog open={confirming} summary={summary} practicalFiles={practicalTask ? practicalTask.files.length : null} submitting={exam.submitting} error={exam.submitError}
+          <SubmitDialog open={confirming} summary={summary} submitting={exam.submitting} error={exam.submitError}
             onCancel={() => setConfirming(false)} onConfirm={exam.submit}
-            onJump={(index) => { setConfirming(false); setView('questions'); setCurrent(index) }} />
+            onJump={(index) => { setConfirming(false); setCurrent(index) }} />
         </main>
       </div>
     </div>

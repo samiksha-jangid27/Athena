@@ -584,6 +584,51 @@ const db = {
       );
     },
 
+    // Returns the most recent attempt for a student & exam regardless of status.
+    // Used to enforce one attempt per student per exam (including submitted/expired).
+    async findAnyByUserAndExam(userId, examId) {
+      if (prismaClient) {
+        return prismaClient.attempt.findFirst({
+          where: { userId, examId },
+          include: { submittedAnswers: true, extensions: true },
+          orderBy: { startedAt: "desc" },
+        });
+      }
+      const matches = memoryStore.attempts
+        .filter((a) => a.userId === userId && a.examId === examId)
+        .sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+      const attempt = matches[0];
+      if (!attempt) return null;
+      return {
+        ...attempt,
+        submittedAnswers: memoryStore.submittedAnswers.filter((sa) => sa.attemptId === attempt.id),
+        extensions: memoryStore.extensions.filter((ex) => ex.attemptId === attempt.id),
+      };
+    },
+
+    async findById(id) {
+      if (prismaClient) {
+        return prismaClient.attempt.findUnique({
+          where: { id },
+          include: {
+            submittedAnswers: true,
+            activityEvents: { orderBy: { seq: "asc" } },
+            extensions: true,
+          },
+        });
+      }
+      const attempt = memoryStore.attempts.find((a) => a.id === id);
+      if (!attempt) return null;
+      return {
+        ...attempt,
+        submittedAnswers: memoryStore.submittedAnswers.filter((sa) => sa.attemptId === attempt.id),
+        activityEvents: memoryStore.activityEvents
+          .filter((ae) => ae.attemptId === attempt.id)
+          .sort((a, b) => a.seq - b.seq),
+        extensions: memoryStore.extensions.filter((ex) => ex.attemptId === attempt.id),
+      };
+    },
+
     async updateTokenHash(id, tokenHash) {
       if (prismaClient) {
         return prismaClient.attempt.update({ where: { id }, data: { tokenHash } });
@@ -673,10 +718,22 @@ const db = {
         autoScore: 0,
         manualScore: 0,
         totalScore: 0,
+        maxScore: null,
         isReviewed: false,
       };
       if (prismaClient) {
         return prismaClient.attempt.create({ data });
+      }
+      // Mirror the Postgres unique constraints (sessionId, tokenHash) so
+      // concurrent or replayed start requests fail the same way they would in
+      // production instead of silently creating a duplicate attempt.
+      const duplicate = memoryStore.attempts.find(
+        (a) => a.sessionId === sessionId || a.tokenHash === tokenHash
+      );
+      if (duplicate) {
+        const error = new Error("Attempt already exists");
+        error.code = "P2002";
+        throw error;
       }
       const att = {
         id: crypto.randomUUID(),
@@ -884,7 +941,7 @@ const db = {
       return record ? { id: record.id, storagePath: record.storagePath, data: record.data || null } : null;
     },
 
-    async updateGrade(attemptId, { autoScore, manualScore, totalScore, isReviewed = true, reviewNotes = "" }) {
+    async updateGrade(attemptId, { autoScore, manualScore, totalScore, maxScore, isReviewed = true, reviewNotes = "" }) {
       const data = {
         autoScore,
         manualScore,
@@ -893,6 +950,7 @@ const db = {
         reviewNotes,
         updatedAt: new Date(),
       };
+      if (maxScore !== undefined && maxScore !== null) data.maxScore = maxScore;
       if (prismaClient) {
         return prismaClient.attempt.update({ where: { id: attemptId }, data });
       }

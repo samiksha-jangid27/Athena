@@ -77,10 +77,18 @@ export default function StudentExamCatalog({ student, token, onSelectExam, onSig
         </div>
       ) : (
         <div className="exam-card-grid">
-          {exams.map((exam) => (
+          {exams.map((exam) => {
+            const status = exam.attemptStatus
+            const completed = status === 'submitted' || status === 'expired'
+            const inProgress = status === 'in-progress' || status === 'locked'
+            return (
             <article key={exam.id} className="exam-catalog-card">
               <div className="card-top">
-                <Badge tone="success" dot>Published & Active</Badge>
+                {completed
+                  ? <Badge tone="success" dot>Completed</Badge>
+                  : inProgress
+                    ? <Badge tone="warning" dot>In progress</Badge>
+                    : <Badge tone="success" dot>Published & Active</Badge>}
                 <div className="exam-duration">
                   <Icon name="clock" size={14} />
                   <span>{exam.durationMinutes} minutes</span>
@@ -100,21 +108,27 @@ export default function StudentExamCatalog({ student, token, onSelectExam, onSig
                   <span className="meta-lbl">Time Limit</span>
                 </div>
                 <div className="meta-pill">
-                  <span className="meta-val">Proctored</span>
-                  <span className="meta-lbl">Integrity Guard</span>
+                  {completed && exam.attemptMaxScore
+                    ? <><span className="meta-val">{exam.attemptScore ?? 0} / {exam.attemptMaxScore}</span><span className="meta-lbl">Score</span></>
+                    : <><span className="meta-val">{completed ? 'Completed' : 'Proctored'}</span><span className="meta-lbl">Integrity Guard</span></>}
                 </div>
               </div>
 
               <div className="card-footer">
-                <Button
-                  className="start-exam-btn"
-                  iconRight="arrowRight"
-                  onClick={() => onSelectExam(exam)}>
-                  Begin Readiness & Launch
-                </Button>
+                {completed ? (
+                  <p className="subtle">You have already completed this exam. It cannot be retaken.</p>
+                ) : (
+                  <Button
+                    className="start-exam-btn"
+                    iconRight="arrowRight"
+                    onClick={() => onSelectExam(exam)}>
+                    {inProgress ? 'Resume exam' : 'Begin Readiness & Launch'}
+                  </Button>
+                )}
               </div>
             </article>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

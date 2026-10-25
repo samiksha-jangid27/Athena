@@ -112,6 +112,7 @@ model Attempt {
   autoScore        Float              @default(0)
   manualScore      Float              @default(0)
   totalScore       Float              @default(0)
+  maxScore         Float?
   isReviewed       Boolean            @default(false)
   reviewNotes      String?
   createdAt        DateTime           @default(now())
