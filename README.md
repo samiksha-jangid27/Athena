@@ -200,7 +200,7 @@ npx prisma generate
 | `ATHENA_JWT_SECRET` | Backend | Secret key for signing session JWTs | *Must be 32+ random characters in production* |
 | `ATHENA_ADMIN_USERNAME`| Backend | Initial bootstrap administrator username | `admin` |
 | `ATHENA_ADMIN_PASSWORD`| Backend | Initial bootstrap administrator password | `AdminPass123!` (Set your own) |
-| `VITE_ATHENA_API_URL` | Frontend | Hosted API URL baked into release DMG | `https://athena-exam-backend.onrender.com` |
+| `VITE_ATHENA_API_URL` | Frontend | Hosted API URL used by release builds (optional; overrides the built-in default) | `https://athena-backend-2a0l.onrender.com` |
 | `ATHENA_EVIDENCE_DIR` | Backend | Storage folder for proctoring snapshots | `backend/data/evidence` |
 
 ---
