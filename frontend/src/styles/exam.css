@@ -9,6 +9,7 @@
 .sync-state.tone-warning { color: var(--warning); }
 .sync-state.tone-danger { color: var(--danger); }
 [data-focus='exam'] .app-nav { visibility: hidden; }
+[data-focus='exam'] .user-profile-pill { display: none !important; }
 .progress-track { height: 4px; border-radius: 2px; background: var(--surface-muted); overflow: hidden; }
 .progress-track span { display: block; height: 100%; background: var(--accent); transition: width 300ms var(--ease); }
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from '../services/api.js'
 import { formatDuration } from '../lib/exam.js'
-import { STATUS_LABEL, STATUS_TONE, attemptRemaining, normalizeStatus, validateExtension } from '../lib/instructor.js'
+import { STATUS_LABEL, STATUS_TONE, EVENT_LABEL, attemptRemaining, normalizeStatus, validateExtension } from '../lib/instructor.js'
 import Badge from './ui/Badge.jsx'
 import Button from './ui/Button.jsx'
 import Field from './ui/Field.jsx'
@@ -61,7 +61,12 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
     if (!adminToken) return undefined
     let active = true
     const load = () => api.admin.getAttempt(adminToken, attempt.sessionId)
-      .then((response) => { if (active) { setDetail(response.attempt); setDetailError('') } })
+      .then((response) => { if (active) {
+        setDetail(response.attempt)
+        setManualMarks(String(response.attempt.manualScore || 0))
+        setReviewNotes(response.attempt.reviewNotes || '')
+        setDetailError('')
+      } })
       .catch((error) => { if (active) setDetailError(error.message || 'Could not load attempt details.') })
     load()
     const timer = setInterval(() => {
@@ -142,6 +147,7 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
         reviewNotes,
       })
       notify(`Grade updated: Total score ${res.attempt.totalScore}.`, 'success')
+      setDetail((current) => ({ ...current, ...res.attempt }))
       onChanged()
     } catch (error) {
       notify(error.message || 'Failed to update grade.', 'error')
@@ -223,11 +229,25 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
             onChange={(e) => setReviewNotes(e.target.value)}
           />
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
-            <Button size="sm" type="submit" loading={savingGrade} disabled={!adminToken}>
+            <Button size="sm" type="submit" loading={savingGrade} disabled={!adminToken || open}>
               {adminToken ? 'Save Grade Review' : 'Sign in as Admin to Grade'}
             </Button>
           </div>
         </form>
+      </section>
+
+      <section className="activity" aria-label="Activity timeline">
+        <h3>Activity timeline</h3>
+        {(reviewedAttempt.activityEvents || attempt.events || []).length === 0 ? <p className="subtle">No activity recorded yet.</p> : (
+          <ol className="activity-list">
+            {[...(reviewedAttempt.activityEvents || attempt.events || [])].reverse().map((event) => (
+              <li key={event.id || event.eventId} className={`sev-${String(event.severity || 'info').toLowerCase()}`}>
+                <time>{time(event.receivedAt)}</time>
+                <div><strong>{EVENT_LABEL[event.type] || event.type}</strong>{event.detail && <p className="subtle">{event.detail}</p>}</div>
+              </li>
+            ))}
+          </ol>
+        )}
       </section>
 
       {/* Proctoring Evidence Thumbnails */}
@@ -243,7 +263,7 @@ export default function AttemptDetail({ attempt, adminToken, instructorKey, serv
                   return (
                   <tr key={questionOrAnswer.id || questionOrAnswer.questionId}>
                     <td>{questionOrAnswer.prompt || questionOrAnswer.question?.prompt || questionOrAnswer.questionId}</td>
-                    <td>{answer?.answerValue ? (() => {
+                    <td>{answer?.answerValue && answer.answerValue !== 'null' ? (() => {
                       try { return JSON.stringify(JSON.parse(answer.answerValue)) } catch { return answer.answerValue }
                     })() : 'Unanswered'}</td>
                     <td>{answer?.autoMarks ?? 0}</td>

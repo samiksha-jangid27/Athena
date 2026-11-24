@@ -1,6 +1,6 @@
 {
   "name": "athena",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A cross-platform desktop examination and proctoring platform featuring exam integrity monitoring, camera and screen capture, instructor controls, and practical assessment support.",
   "repository": "https://github.com/samiksha-jangid27/Athena",
   "private": true,
@@ -9,9 +9,9 @@
     "dev": "npm --prefix frontend run dev",
     "electron": "npm --prefix frontend run electron",
     "lint": "npm --prefix frontend run lint",
-    "test": "npm --prefix backend test && npm --prefix frontend test",
+    "test": "npm run build:frontend && npm --prefix backend test && npm --prefix frontend test",
     "build:frontend": "npm --prefix frontend run build",
-    "dist": "npm run build:frontend && electron-builder"
+    "dist": "npm run build:frontend && electron-builder --publish never"
   },
   "devDependencies": {
     "electron": "^44.3.0",
@@ -25,6 +25,7 @@
       "output": "release"
     },
     "mac": {
+      "icon": "build/icon.icns",
       "target": "dmg",
       "category": "public.app-category.education",
       "extendInfo": {

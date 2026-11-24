@@ -58,6 +58,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
   const [attemptsError, setAttemptsError] = useState(null)
   // Driven by the real list-attempts request, not a hard-coded phrase.
   const [backendStatus, setBackendStatus] = useState('checking')
+  const [serverOffset, setServerOffset] = useState(0)
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [sort, setSort] = useState('activity')
@@ -101,6 +102,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
     try {
       const list = adminToken ? await api.admin.listAttempts(adminToken) : await api.listAttempts('test')
       setAttempts((list || []).map((item) => ({ ...item, status: normalizeStatus(item.status) })))
+      if (list?.[0]?.serverTime) setServerOffset(Date.parse(list[0].serverTime) - Date.now())
       setAttemptsError(null)
       setBackendStatus('online')
     } catch (err) {
@@ -151,6 +153,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
         const list = adminToken ? await api.admin.listAttempts(adminToken) : await api.listAttempts('test')
         if (active) {
           setAttempts((list || []).map((item) => ({ ...item, status: normalizeStatus(item.status) })))
+          if (list?.[0]?.serverTime) setServerOffset(Date.parse(list[0].serverTime) - Date.now())
           setAttemptsError(null)
           setBackendStatus('online')
           setLoadingAttempts(false)
@@ -499,7 +502,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                   </thead>
                   <tbody>
                     {rows.map((att) => {
-                      const remaining = attemptRemaining(att, 0, now)
+                      const remaining = attemptRemaining(att, serverOffset, now)
                       const isSelected = att.sessionId === selectedId
                       return (
                         <tr
@@ -543,7 +546,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                 key={selected.sessionId}
                 attempt={selected}
                 adminToken={adminToken}
-                serverOffset={0}
+                serverOffset={serverOffset}
                 now={now}
                 onChanged={refreshAttempts}
                 onClose={() => setSelectedId(null)}
@@ -728,7 +731,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
         <div className="question-manager-content">
           <div className="row" style={{ justifyContent: 'space-between', marginBottom: '16px' }}>
             <span className="subtle">{examQuestions.length} questions in this assessment</span>
-            <Button size="sm" icon="check" onClick={() => setShowAddQuestion(true)}>Add Question</Button>
+            <Button size="sm" icon="check" disabled={Boolean(selectedExamForQuestions?._count?.attempts)} onClick={() => setShowAddQuestion(true)}>Add Question</Button>
           </div>
 
           {loadingQuestions ? (
@@ -747,7 +750,7 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                     </div>
                     <strong style={{ display: 'block', marginTop: '4px' }}>{q.prompt}</strong>
                   </div>
-                  <Button size="sm" variant="ghost" onClick={() => handleDeleteQuestion(q.id)}>
+                  <Button size="sm" variant="ghost" disabled={Boolean(selectedExamForQuestions?._count?.attempts)} onClick={() => handleDeleteQuestion(q.id)}>
                     Remove
                   </Button>
                 </div>

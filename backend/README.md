@@ -1,29 +1,16 @@
 # Athena backend
 
-A small Express server that stores attempts in JSON files. It is meant for local development; see the root README for production gaps.
+Express API with Prisma/PostgreSQL persistence in production. Without `DATABASE_URL`, development and tests use an in-memory repository; it resets when the process exits. Legacy `/exam`, `/practical`, and `/instructor` routes use the separate JSON store.
 
-```bash
+```sh
 npm install
-npm start   # http://127.0.0.1:3000, prints the instructor key
+npm run db:generate
+npm start
 npm test
 ```
 
-## Student endpoints (Bearer token from `/exam/start`)
+The current client signs in at `/api/auth/login`, lists `/api/student/exams`, and starts an attempt at `/api/student/exams/:id/start`. Subsequent `/api/student/attempt` requests use the issued attempt token. Admin routes under `/api/admin` require an administrator JWT. Passwords use bcrypt; attempt tokens are stored as SHA-256 hashes.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| POST | `/exam/start` | `{ userId, name }` → `{ token, attempt, questions }` |
-| GET | `/exam/attempt` | Current attempt + questions (recovery and heartbeat) |
-| PUT | `/exam/answers` | `{ answers: { [questionId]: optionIndex }, flags: [] }`; idempotent full save |
-| POST | `/exam/events` | `{ events: [{ type, at, detail? }] }`; whitelisted types only |
-| POST | `/exam/submit` | Final save + submit; idempotent |
+Autosaves enforce locks and server deadlines with a five-second network grace period. Late submission grades previously saved answers. Finalization persists totals and per-question marks together. A submitted attempt cannot be unlocked or extended. Expired attempts may be extended from the current time. Question sets are frozen once any attempt exists.
 
-## Instructor endpoints (`x-instructor-key` header)
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| GET | `/instructor/attempts` | All attempts with scores and events |
-| POST | `/instructor/attempts/:id/unlock` | Unlock after a fullscreen exit |
-| POST | `/instructor/attempts/:id/extend` | `{ minutes }` (1–120); also reopens an expired attempt |
-
-Answers are rejected after the deadline (plus a 5-second grace period) and while an attempt is locked.
+Set production configuration in the hosting environment (see the root README and `render.yaml`). Environment examples are documentation; this server does not automatically load `.env` files.

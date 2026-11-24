@@ -51,17 +51,15 @@ Athena is architected as a centralized client-server platform where all students
 
 ### Student Experience
 - **Zero-configuration**: Open the DMG, sign in with provisioned credentials.
-- **Authorized Exam Catalog**: View active and upcoming examinations assigned to the student.
+- **Authorized Exam Catalog**: View published examinations available to student accounts.
 - **4-Step Readiness Check**:
   1. Welcome with exam facts (time limit, questions, policies).
   2. Verified identification.
   3. System check: Live camera preview, macOS screen recording permission check, and disallowed application scan (Discord, Slack, TeamViewer, Zoom, etc.).
   4. Explicit consent outlining captured data and privacy boundaries.
-- **Multi-Type Question Answering**:
-  - Single Choice (MCQ) with keyboard shortcuts (`1`–`9`, `A`–`D`).
-  - Multiple Select (MSQ) with multi-option checkboxes.
-  - True / False objective selection.
-  - Short Answer / Essay input with real-time character counters.
+- **Multiple-Choice Answering**:
+  - Four options and one correct answer per question, with keyboard shortcuts (`1`–`4`, `A`–`D`).
+  - The active editor and exam runner support MCQs. The grading library and schema retain other question types for future use.
 - **Resilient Exam Taking**:
   - Server-synced countdown timer escalating urgency at 5 minutes and 1 minute.
   - Filterable question navigator (All, Unanswered, Flagged for review).
@@ -71,13 +69,13 @@ Athena is architected as a centralized client-server platform where all students
 
 ### Administrator Command Center
 - **Exam Management**:
-  - Create, configure, preview, publish, unpublish, and archive exams.
+  - Create exams, add questions, publish, and unpublish them.
   - Set titles, descriptions, instructions, durations, passing scores, and total marks.
-  - Add, reorder, and remove questions of all four types (MCQ, MSQ, True/False, Short Answer).
-  - Safe publishing: Exams cannot be modified while students have active attempts.
+  - Add and remove four-option MCQs before an exam has any attempts.
+  - Safe publishing: Questions are frozen after the first attempt to preserve grading consistency.
 - **Student Provisioning**:
   - Provision student accounts with usernames and temporary passwords.
-  - Manage enrollments and view account status.
+  - List and provision student accounts; published exams are available to all student accounts.
 - **Real-Time Proctoring & Attempt Monitoring**:
   - Live table of all attempts with status badges (`In progress`, `Locked`, `Submitted`, `Expired`).
   - Auto-refreshing countdowns and critical violation counters.
@@ -86,7 +84,7 @@ Athena is architected as a centralized client-server platform where all students
   - One-click audited actions: **Unlock attempt** and **Extend deadline** (+1 to 120 minutes).
 - **Grading & Results**:
   - Automatic scoring for objective questions.
-  - Manual review and score overrides for short answers with instructor audit notes.
+  - Review submitted attempts and make bounded score adjustments with instructor audit notes.
   - **One-click CSV Export** of full exam results.
 
 ---
@@ -94,8 +92,8 @@ Athena is architected as a centralized client-server platform where all students
 ## 3. Quick Start (Local Development)
 
 ### Prerequisites
-- Node.js 20+ and npm
-- macOS 11+ (Apple Silicon or Intel)
+- Node.js 22.12+ and npm
+- macOS 13+ (the supplied DMG targets Apple Silicon)
 
 ### 1. Install Dependencies
 ```bash
@@ -119,7 +117,7 @@ npm run electron
 
 ### 3. Run Test Suites & Linter
 ```bash
-# Run all tests (38 backend integration & rule tests + 30 frontend & Electron tests)
+# Run all tests (57 backend integration & rule tests + 38 frontend & Electron tests)
 npm test
 
 # Run ESLint across frontend and main process
@@ -217,10 +215,10 @@ export VITE_ATHENA_API_URL="https://athena-backend-2a0l.onrender.com"
 npm run dist
 ```
 
-- Output DMG artifact: `release/Athena-1.0.0-arm64.dmg` (~123 MB).
+- Output DMG artifact: `release/Athena-1.0.1-arm64.dmg` (~123 MB).
 - Architecture: Apple Silicon (`arm64`).
-- Minimum Supported macOS: macOS 11.0 (Big Sur) through macOS 15+ (Sequoia) and macOS 26+.
-- Code Signing & Notarization: Configured in `package.json` under `mac`. When Apple Developer credentials (`APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `CSC_LINK`) are provided in CI, electron-builder signs and notarizes the DMG automatically.
+- Minimum supported macOS: 13.0; the supplied artifact targets Apple Silicon (`arm64`).
+- Code Signing & Notarization: The local demo build is not Developer ID signed or notarized. Internet distribution requires a Developer ID certificate and Apple notarization credentials. Packaging uses `--publish never`; it does not create a GitHub release.
 
 ---
 
@@ -228,7 +226,7 @@ npm run dist
 
 - **Sandbox & Isolation**: Electron runs with `contextIsolation: true`, `nodeIntegration: false`, and `sandbox: true`. DevTools and prohibited hotkeys are disabled in packaged builds.
 - **Validated Preload**: The preload script exposes only explicit IPC handlers with sender origin checks.
-- **Camera & Screen Recording**: Snapshots are taken approximately every 30 seconds. On macOS, screen recording requires explicit user approval in System Settings.
+- **Camera & Screen Recording**: Snapshots are taken approximately every 10 seconds. On macOS, screen recording requires explicit user approval in System Settings.
 - **Private Evidence Storage**: Snaps are streamed securely over HTTPS to the backend, stored in access-controlled directories or private object storage, and served strictly through authenticated administrator routes (`/api/admin/evidence/:id`).
 - **Best-Effort Integrity**: Athena honestly records window focus changes, fullscreen exits, and background processes. It acknowledges that OS-level shortcuts (e.g. Cmd+Tab, Mission Control) cannot be completely blocked by any desktop application.
 

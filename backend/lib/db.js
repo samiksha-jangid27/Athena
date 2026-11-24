@@ -777,7 +777,8 @@ const db = {
         const attempt = await prismaClient.attempt.findUnique({ where: { id } });
         if (!attempt) throw new Error("Attempt not found");
         const currentDeadline = new Date(attempt.deadline).getTime();
-        const newDeadline = new Date(currentDeadline + minutes * 60 * 1000);
+        const base = attempt.status === "EXPIRED" ? Math.max(currentDeadline, Date.now()) : currentDeadline;
+        const newDeadline = new Date(base + minutes * 60 * 1000);
         await prismaClient.attemptExtension.create({
           data: { attemptId: id, minutes, grantedBy },
         });
@@ -793,7 +794,8 @@ const db = {
       const att = memoryStore.attempts.find((a) => a.id === id);
       if (!att) throw new Error("Attempt not found");
       const currentDeadline = new Date(att.deadline).getTime();
-      att.deadline = new Date(currentDeadline + minutes * 60 * 1000);
+      const base = att.status === "EXPIRED" ? Math.max(currentDeadline, Date.now()) : currentDeadline;
+      att.deadline = new Date(base + minutes * 60 * 1000);
       if (att.status === "EXPIRED") {
         att.status = "IN_PROGRESS";
         att.submittedAt = null;
@@ -813,7 +815,9 @@ const db = {
       const now = new Date();
       if (prismaClient) {
         // Upsert submitted answers
-        for (const [questionId, value] of Object.entries(answersMap)) {
+        await prismaClient.submittedAnswer.updateMany({ where: { attemptId }, data: { isFlagged: false } });
+        for (const questionId of new Set([...Object.keys(answersMap), ...flagsList.map(String)])) {
+          const value = answersMap[questionId] ?? null;
           const isFlagged = flagsList.includes(questionId) || flagsList.includes(Number(questionId));
           const answerValue = typeof value === "string" ? value : JSON.stringify(value);
           await prismaClient.submittedAnswer.upsert({
@@ -837,7 +841,9 @@ const db = {
       }
 
       // Memory implementation
-      for (const [questionId, value] of Object.entries(answersMap)) {
+      for (const answer of memoryStore.submittedAnswers.filter((item) => item.attemptId === attemptId)) answer.isFlagged = false;
+      for (const questionId of new Set([...Object.keys(answersMap), ...flagsList.map(String)])) {
+        const value = answersMap[questionId] ?? null;
         const qIdStr = String(questionId);
         const isFlagged = flagsList.includes(questionId) || flagsList.includes(Number(questionId));
         const answerValue = typeof value === "string" ? value : JSON.stringify(value);
@@ -961,6 +967,34 @@ const db = {
       }
       const record = memoryStore.evidence.find((item) => item.id === id);
       return record ? { id: record.id, storagePath: record.storagePath, data: record.data || null } : null;
+    },
+
+    async finalize(attemptId, grading, status = "SUBMITTED") {
+      const data = {
+        status, submittedAt: new Date(), autoScore: grading.autoScore,
+        manualScore: 0, totalScore: grading.autoScore, maxScore: grading.maxPossible,
+        isReviewed: !grading.hasManualPending,
+      };
+      if (prismaClient) {
+        await prismaClient.$transaction(async (tx) => {
+          for (const item of grading.gradedItems) {
+            await tx.submittedAnswer.updateMany({
+              where: { attemptId, questionId: String(item.questionId) },
+              data: { isCorrect: item.isCorrect, autoMarks: item.marksAwarded },
+            });
+          }
+          await tx.attempt.update({ where: { id: attemptId }, data });
+        });
+      } else {
+        const attempt = memoryStore.attempts.find((item) => item.id === attemptId);
+        if (!attempt) throw new Error("Attempt not found");
+        for (const item of grading.gradedItems) {
+          const answer = memoryStore.submittedAnswers.find((a) => a.attemptId === attemptId && a.questionId === String(item.questionId));
+          if (answer) Object.assign(answer, { isCorrect: item.isCorrect, autoMarks: item.marksAwarded });
+        }
+        Object.assign(attempt, data, { updatedAt: new Date() });
+      }
+      return db.attempts.findById(attemptId);
     },
 
     async updateGrade(attemptId, { autoScore, manualScore, totalScore, maxScore, isReviewed = true, reviewNotes = "" }) {

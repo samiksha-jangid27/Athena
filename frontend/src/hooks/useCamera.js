@@ -11,6 +11,7 @@ export function useCamera() {
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
     setStream(null)
+    setStatus('idle')
   }, [])
 
   const start = useCallback(async () => {

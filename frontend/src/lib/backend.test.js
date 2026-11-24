@@ -64,6 +64,7 @@ test('the built index.html pins the CSP to the live backend', (t) => {
   }
   const html = readFileSync(distIndex, 'utf8')
   assert.match(html, /http-equiv="Content-Security-Policy"/, 'the production bundle ships a CSP')
-  assert.ok(html.includes(`connect-src http://127.0.0.1:3000 ${DEFAULT_API_HOST}`), 'connect-src names the live backend')
+  const configured = process.env.VITE_ATHENA_API_URL || 'http://127.0.0.1:3000'
+  assert.ok(html.includes(buildContentSecurityPolicy(configured)), 'connect-src matches the backend used for this build')
   assert.ok(!/athena-exam-backend/.test(html), 'the obsolete host is not baked into the bundle')
 })

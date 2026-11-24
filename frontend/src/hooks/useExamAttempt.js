@@ -38,6 +38,9 @@ export function useExamAttempt() {
   const prevDeadlineRef = useRef(null)
   const submittingRef = useRef(false)
   const startRequestIdRef = useRef(null)
+  const eventFlightRef = useRef(null)
+  const saveFlightRef = useRef(false)
+  const revisionRef = useRef(0)
   const stateRef = useRef({})
   // Latest values for async callbacks (timers, retries).
   useLayoutEffect(() => {
@@ -62,6 +65,7 @@ export function useExamAttempt() {
 
   const applyServer = useCallback((serverAttempt) => {
     if (!serverAttempt) return
+    stateRef.current.attempt = { ...stateRef.current.attempt, ...serverAttempt }
     if (prevDeadlineRef.current && serverAttempt.deadline) {
       const prev = Date.parse(prevDeadlineRef.current)
       const current = Date.parse(serverAttempt.deadline)
@@ -70,44 +74,54 @@ export function useExamAttempt() {
         setExtensionNotice(`Time extended: +${addedMin} minute${addedMin === 1 ? '' : 's'} added to your exam.`)
       }
     }
-    prevDeadlineRef.current = serverAttempt.deadline
-    setAttempt(serverAttempt)
-    setServerOffset(Date.parse(serverAttempt.serverTime) - Date.now())
+    if (serverAttempt.deadline) prevDeadlineRef.current = serverAttempt.deadline
+    setAttempt((previous) => ({ ...previous, ...serverAttempt }))
+    if (Number.isFinite(Date.parse(serverAttempt.serverTime))) {
+      setServerOffset(Date.parse(serverAttempt.serverTime) - Date.now())
+    }
   }, [])
 
   // ---- Activity events: queued locally, flushed with retries ----
   const flushEvents = useCallback(async () => {
+    if (eventFlightRef.current) return eventFlightRef.current
     const currentToken = stateRef.current.token
     if (!currentToken || eventsRef.current.length === 0) return
-    const batch = eventsRef.current.slice(0, 50)
-    try {
-      const data = await withRetry(() => api.student.sendEvents(currentToken, batch), { retries: 2 })
-      eventsRef.current = eventsRef.current.slice(batch.length)
-      applyServer(data.attempt)
-      if (data.attempt?.status === 'locked' || !eventsRef.current.some((e) => e.type === 'fullscreen-exit')) {
+    const job = async () => {
+      while (eventsRef.current.length > 0) {
+      const batch = eventsRef.current.slice(0, 50)
+      try {
+        const data = await withRetry(() => api.student.sendEvents(currentToken, batch), { retries: 2 })
+        eventsRef.current = eventsRef.current.slice(batch.length)
+        applyServer(data.attempt)
+        if (data.attempt?.status === 'locked' || !eventsRef.current.some((e) => e.type === 'fullscreen-exit')) {
+          setPendingLock(false)
+        }
+      } catch (error) {
+        if (!isRejection(error)) {
+          // Network problem: keep the events queued and try again later.
+          setEventState({ pending: eventsRef.current.length, rejected: 0 })
+          persist()
+          return
+        }
+        // The server refused them (e.g. attempt is already submitted or expired); drop them
+        eventsRef.current = eventsRef.current.slice(batch.length)
+        setEventState((state) => ({ ...state, rejected: state.rejected + batch.length }))
         setPendingLock(false)
+        applyServer(error.body?.attempt)
       }
-    } catch (error) {
-      if (!isRejection(error)) {
-        // Network problem: keep the events queued and try again later.
-        setEventState({ pending: eventsRef.current.length, rejected: 0 })
-        persist()
-        return
-      }
-      // The server refused them (e.g. attempt is already submitted or expired); drop them
-      eventsRef.current = eventsRef.current.slice(batch.length)
-      setEventState((state) => ({ ...state, rejected: state.rejected + batch.length }))
-      setPendingLock(false)
-      applyServer(error.body?.attempt)
+      setEventState((state) => ({ ...state, pending: eventsRef.current.length }))
+      persist()
     }
-    setEventState((state) => ({ ...state, pending: eventsRef.current.length }))
-    persist()
+    }
+    eventFlightRef.current = job()
+    try { await eventFlightRef.current } finally { eventFlightRef.current = null }
   }, [applyServer, persist])
 
   const logEvent = useCallback((type, detail) => {
     if (!stateRef.current.token) return
     // Lock answering locally right away; the server confirms the lock.
     if (type === 'fullscreen-exit') {
+      stateRef.current.pendingLock = true
       setPendingLock(true)
       setLockedAt(Date.now())
     }
@@ -119,20 +133,25 @@ export function useExamAttempt() {
 
   // ---- Answer saving ----
   const saveNow = useCallback(async () => {
-    const { token: currentToken, answers: currentAnswers, flags: currentFlags, attempt: currentAttempt, pendingLock: currentPendingLock } = stateRef.current
+    const { token: currentToken, attempt: currentAttempt, pendingLock: currentPendingLock } = stateRef.current
     if (!currentToken || !dirtyRef.current) return
+    if (saveFlightRef.current) return
     if (currentPendingLock || currentAttempt?.status === 'locked') return
     // If there are pending events (e.g. exit event), flush them first so the server locks first
     if (eventsRef.current.length > 0) {
       await flushEvents()
     }
     if (stateRef.current.attempt?.status === 'locked' || stateRef.current.pendingLock) return
+    if (saveFlightRef.current) return
+    const { answers: currentAnswers, flags: currentFlags } = stateRef.current
     setSaveState('saving')
-    dirtyRef.current = false
+    saveFlightRef.current = true
+    const revision = revisionRef.current
     try {
       const data = await withRetry(() => api.student.saveAnswers(currentToken, currentAnswers, currentFlags), { retries: 2 })
       applyServer(data.attempt)
-      setSaveState('saved')
+      if (revision === revisionRef.current) dirtyRef.current = false
+      setSaveState(dirtyRef.current ? 'saving' : 'saved')
       setLastSavedAt(Date.now())
     } catch (error) {
       if (isRejection(error)) {
@@ -142,11 +161,14 @@ export function useExamAttempt() {
         dirtyRef.current = true // retried on the next heartbeat
         setSaveState('offline')
       }
+    } finally {
+      saveFlightRef.current = false
     }
     persist()
   }, [applyServer, flushEvents, persist])
 
   function markDirty() {
+    revisionRef.current += 1
     dirtyRef.current = true
     setSaveState('saving')
   }

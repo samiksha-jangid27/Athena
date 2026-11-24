@@ -619,3 +619,108 @@ test("repository failures surface as clear 500 errors", async () => {
     db.exams.listAll = original;
   }
 });
+
+test("late direct submission grades saved answers and persists per-question marks", async () => {
+  const admin = await adminToken();
+  const student = await createStudent(admin);
+  const { exam, questions } = await createPublishedMcqExam(admin);
+  const start = await startExam(student, exam.id);
+  await call('/api/student/attempt/answers', { method: 'PUT', token: start.data.token, body: { answers: { [questions[0].id]: 1 } } });
+  await db.attempts.extendDeadline((await db.attempts.findBySessionId(start.data.sessionId)).id, -20);
+  const submitted = await call('/api/student/attempt/submit', { method: 'POST', token: start.data.token, body: { answers: { [questions[0].id]: 0 } } });
+  assert.equal(submitted.res.status, 200);
+  assert.equal(submitted.data.result.score, 0, 'late changed answers are ignored even without a heartbeat');
+  const detail = await db.attempts.findBySessionId(start.data.sessionId);
+  assert.equal(detail.submittedAnswers[0].isCorrect, false);
+  assert.equal(detail.submittedAnswers[0].autoMarks, 0);
+  assert.equal((await call(`/api/admin/attempts/${start.data.sessionId}/unlock`, { method: 'POST', token: admin })).res.status, 409);
+  assert.equal((await call(`/api/admin/attempts/${start.data.sessionId}/extend`, { method: 'POST', token: admin, body: { minutes: 5 } })).res.status, 409);
+});
+
+test("unanswered review flags survive recovery and can be cleared", async () => {
+  const admin = await adminToken();
+  const student = await createStudent(admin);
+  const { exam, questions } = await createPublishedMcqExam(admin);
+  const start = await startExam(student, exam.id);
+  await call('/api/student/attempt/answers', { method: 'PUT', token: start.data.token, body: { answers: {}, flags: [questions[0].id] } });
+  let view = await call('/api/student/attempt', { token: start.data.token });
+  assert.deepEqual(view.data.attempt.answers, {});
+  assert.deepEqual(view.data.attempt.flags, [questions[0].id]);
+  await call('/api/student/attempt/answers', { method: 'PUT', token: start.data.token, body: { answers: {}, flags: [] } });
+  view = await call('/api/student/attempt', { token: start.data.token });
+  assert.deepEqual(view.data.attempt.flags, []);
+});
+
+test("a slow autosave cannot overwrite answers after a concurrent submission", async () => {
+  const admin = await adminToken();
+  const student = await createStudent(admin);
+  const { exam, questions } = await createPublishedMcqExam(admin);
+  const start = await startExam(student, exam.id);
+  const original = db.attempts.saveAnswers;
+  let release;
+  let announce;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const began = new Promise((resolve) => { announce = resolve; });
+  db.attempts.saveAnswers = async function (id, answers, flags) {
+    if (answers[questions[0].id] === 0) { announce(); await gate; }
+    return original.call(this, id, answers, flags);
+  };
+  try {
+    const save = call('/api/student/attempt/answers', { method: 'PUT', token: start.data.token, body: { answers: { [questions[0].id]: 0 } } });
+    await began;
+    const submit = call('/api/student/attempt/submit', { method: 'POST', token: start.data.token, body: { answers: { [questions[0].id]: 1 } } });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    release();
+    await save;
+    assert.equal((await submit).data.result.score, 0);
+    const view = await call('/api/student/attempt', { token: start.data.token });
+    assert.equal(view.data.attempt.answers[questions[0].id], 1);
+    assert.equal(view.data.result.correct, 0);
+  } finally {
+    release();
+    db.attempts.saveAnswers = original;
+  }
+});
+
+test("expired attempts retain their grade and an extension grants time from now", async () => {
+  const admin = await adminToken();
+  const student = await createStudent(admin);
+  const { exam, questions } = await createPublishedMcqExam(admin);
+  const start = await startExam(student, exam.id);
+  await call('/api/student/attempt/answers', { method: 'PUT', token: start.data.token, body: { answers: { [questions[0].id]: 0 } } });
+  const stored = await db.attempts.findBySessionId(start.data.sessionId);
+  await db.attempts.extendDeadline(stored.id, -20);
+  const rows = await call('/api/admin/attempts', { token: admin });
+  const row = rows.data.find((item) => item.sessionId === start.data.sessionId);
+  assert.equal(row.status, 'expired');
+  assert.equal(row.totalScore, 10);
+  assert.equal(row.attempted, 1);
+  const before = Date.now();
+  const extended = await call(`/api/admin/attempts/${start.data.sessionId}/extend`, { method: 'POST', token: admin, body: { minutes: 2 } });
+  assert.equal(extended.res.status, 200);
+  assert.ok(Date.parse(extended.data.deadline) >= before + 120000);
+});
+
+test("activity validation is atomic, severity comes from the server, and questions freeze", async () => {
+  const admin = await adminToken();
+  const student = await createStudent(admin);
+  const { exam, questions } = await createPublishedMcqExam(admin);
+  const start = await startExam(student, exam.id);
+  const bad = await call('/api/student/attempt/events', { method: 'POST', token: start.data.token, body: { events: [{ id: 'valid', type: 'window-blur' }, { id: 'invalid', type: 'anything' }] } });
+  assert.equal(bad.res.status, 400);
+  assert.equal((await db.attempts.findBySessionId(start.data.sessionId)).activityEvents.length, 0);
+  const event = { id: 'lock-regression', type: 'fullscreen-exit', severity: 'INFO' };
+  await call('/api/student/attempt/events', { method: 'POST', token: start.data.token, body: { events: [event] } });
+  let detail = await db.attempts.findBySessionId(start.data.sessionId);
+  assert.equal(detail.activityEvents[0].severity, 'CRITICAL');
+  assert.equal((await call(`/api/admin/attempts/${start.data.sessionId}/unlock`, { method: 'POST', token: admin })).res.status, 200);
+  assert.equal((await call(`/api/admin/questions/${questions[0].id}`, { method: 'PUT', token: admin, body: { correctAnswer: 1 } })).res.status, 409);
+  assert.equal((await call(`/api/admin/questions/${questions[0].id}`, { method: 'DELETE', token: admin })).res.status, 409);
+  const submit = await call('/api/student/attempt/submit', { method: 'POST', token: start.data.token, body: { answers: { [questions[0].id]: 0 } } });
+  assert.equal(submit.data.result.score, 10);
+  detail = await db.attempts.findBySessionId(start.data.sessionId);
+  assert.equal(detail.submittedAnswers[0].autoMarks, 10);
+  const grade = `/api/admin/attempts/${start.data.sessionId}/grade`;
+  assert.equal((await call(grade, { method: 'PUT', token: admin, body: { manualScore: 100 } })).res.status, 400);
+  assert.equal((await call(grade, { method: 'PUT', token: admin, body: { manualScore: -2, reviewNotes: 'Reviewed' } })).res.status, 200);
+});

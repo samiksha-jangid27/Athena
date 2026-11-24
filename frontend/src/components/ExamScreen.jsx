@@ -261,6 +261,12 @@ export default function ExamScreen({ exam, camera, athena }) {
         </aside>
 
         <main className="question-pane">
+          {exam.submitError && (
+            <Callout tone="danger" role="alert">
+              <p>{exam.submitError}</p>
+              <Button size="sm" loading={exam.submitting} onClick={exam.submit}>Retry submission</Button>
+            </Callout>
+          )}
           {exam.extensionNotice && (
             <Callout tone="success" role="status">
               <div className="row">

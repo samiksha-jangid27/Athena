@@ -34,11 +34,23 @@ export default function LoginScreen({ onLoginSuccess }) {
 
   useEffect(() => {
     let mounted = true
-    api.diagnose().then((result) => {
-      if (mounted) setDiagnostic(result)
-    })
+    let timer
+    const check = async () => {
+      if (!mounted) return
+      setCheckingHealth(true)
+      try {
+        const result = await api.diagnose()
+        if (!mounted) return
+        setDiagnostic(result)
+        timer = setTimeout(check, result.online ? 30000 : 5000)
+      } finally {
+        if (mounted) setCheckingHealth(false)
+      }
+    }
+    timer = setTimeout(check, 0)
     return () => {
       mounted = false
+      clearTimeout(timer)
     }
   }, [])
 
@@ -139,7 +151,7 @@ export default function LoginScreen({ onLoginSuccess }) {
         </form>
 
         <div className="login-footer">
-          <div className="server-status-pill" onClick={() => setShowSettings(true)}>
+          <button type="button" className="server-status-pill" onClick={() => setShowSettings(true)}>
             <span className={`pulse-dot ${diagnostic?.online ? 'tone-success live' : 'tone-danger'}`} />
             <span className="server-label">
               {checkingHealth
@@ -147,11 +159,11 @@ export default function LoginScreen({ onLoginSuccess }) {
                 : diagnostic?.online
                 ? 'Server connected'
                 : diagnostic
-                ? 'Server offline / Wake up'
+                ? 'Server unreachable · retrying'
                 : 'Checking server…'}
             </span>
             <Icon name="settings" size={13} className="settings-icon" />
-          </div>
+          </button>
         </div>
       </div>
 

@@ -1,8 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
 
 // Native <dialog>: focus is trapped and Escape closes it, for free.
 export default function Modal({ open, title, onClose, children, footer, tone = 'default' }) {
   const ref = useRef(null)
+  const titleId = useId()
 
   useEffect(() => {
     const dialog = ref.current
@@ -12,11 +13,11 @@ export default function Modal({ open, title, onClose, children, footer, tone = '
   }, [open])
 
   return (
-    <dialog ref={ref} className={`modal modal-${tone}`} aria-labelledby="modal-title"
+    <dialog ref={ref} className={`modal modal-${tone}`} aria-labelledby={titleId}
       onCancel={(event) => { event.preventDefault(); onClose?.() }}>
       {open && (
         <>
-          <h2 id="modal-title" className="modal-title">{title}</h2>
+          <h2 id={titleId} className="modal-title">{title}</h2>
           <div className="modal-body">{children}</div>
           {footer && <div className="modal-footer">{footer}</div>}
         </>

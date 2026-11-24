@@ -66,11 +66,13 @@ function attemptAnswers(attempt) {
   const answers = {};
   const flags = [];
   for (const answer of attempt.submittedAnswers || []) {
+    let value;
     try {
-      answers[answer.questionId] = JSON.parse(answer.answerValue);
+      value = JSON.parse(answer.answerValue);
     } catch {
-      answers[answer.questionId] = answer.answerValue;
+      value = answer.answerValue;
     }
+    if (value !== null && value !== undefined) answers[answer.questionId] = value;
     if (answer.isFlagged) flags.push(answer.questionId);
   }
   return { answers, flags };
@@ -159,6 +161,12 @@ function answerPayloadError(questions, answers, flags) {
   return validateAnswerPayload(questions, answers) || validateFlags(questions, flags);
 }
 
+async function finalizeStoredAttempt(attempt, status = "SUBMITTED") {
+  const questions = await db.questions.listByExam(attempt.examId, { includeAnswers: true });
+  const grading = gradeAttempt(questions, attemptAnswers(attempt).answers);
+  return db.attempts.finalize(attempt.id, grading, status);
+}
+
 function createApp(config = {}) {
   const {
     instructorKey = process.env.ATHENA_INSTRUCTOR_KEY || "dev-instructor-key",
@@ -171,6 +179,25 @@ function createApp(config = {}) {
   } = config;
 
   const app = express();
+  // Keep heartbeat, save, event and submit operations ordered for each attempt.
+  // A slow autosave must finish before a later submit is allowed to grade it.
+  const attemptOperations = new Map();
+  function serializeAttempt(handler) {
+    return async (req, res, next) => {
+      const key = hashToken(req.get("authorization") || "anonymous");
+      const previous = attemptOperations.get(key) || Promise.resolve();
+      let release;
+      const lease = new Promise((resolve) => { release = resolve; });
+      const tail = previous.then(() => lease);
+      attemptOperations.set(key, tail);
+      await previous;
+      try { await handler(req, res); } catch (error) { next(error); }
+      finally {
+        release();
+        if (attemptOperations.get(key) === tail) attemptOperations.delete(key);
+      }
+    };
+  }
 
   // CORS configuration
   // The desktop client runs from a file:// origin (sent as "null") and from
@@ -477,6 +504,7 @@ function createApp(config = {}) {
       if (!exam) return sendError(res, 404, "Exam not found");
 
       const { type, prompt, options, correctAnswer, marks, orderIndex, explanation } = req.body || {};
+      if (exam.attempts?.length) return sendError(res, 409, "Questions are frozen after an exam has attempts; create a new exam to change them");
       const invalid = validateMcqQuestion({ type, prompt, options, correctAnswer, marks: marks ?? 1 });
       if (invalid) return sendError(res, 400, invalid);
 
@@ -508,6 +536,7 @@ function createApp(config = {}) {
     try {
       const q = await db.questions.findById(req.params.id);
       if (!q) return sendError(res, 404, "Question not found");
+      if ((await db.attempts.listByExam(q.examId)).length) return sendError(res, 409, "Questions are frozen after an exam has attempts");
 
       // The payload may be partial, so validate the merged result to keep the
       // stored question a valid four-option MCQ.
@@ -532,6 +561,9 @@ function createApp(config = {}) {
   // Admin: Delete question
   app.delete("/api/admin/questions/:id", ...requireAdmin, async (req, res) => {
     try {
+      const question = await db.questions.findById(req.params.id);
+      if (!question) return sendError(res, 404, "Question not found");
+      if ((await db.attempts.listByExam(question.examId)).length) return sendError(res, 409, "Questions are frozen after an exam has attempts");
       const deleted = await db.questions.delete(req.params.id);
       if (!deleted) return sendError(res, 404, "Question not found");
       res.json({ message: "Question deleted successfully" });
@@ -598,11 +630,11 @@ function createApp(config = {}) {
       const attempts = await db.attempts.listAll();
       const now = Date.now();
       const list = [];
-      for (const att of attempts) {
+      for (let att of attempts) {
         // Bug 11: Finalize stale in-progress attempts past deadline
         let status = att.status;
         if ((status === "IN_PROGRESS" || status === "LOCKED") && now > new Date(att.deadline).getTime() + 5000) {
-          await db.attempts.updateStatus(att.id, "EXPIRED", new Date());
+          att = { ...att, ...await finalizeStoredAttempt(att, "EXPIRED") };
           status = "EXPIRED";
         }
         list.push({
@@ -616,13 +648,14 @@ function createApp(config = {}) {
           deadline: att.deadline,
           submittedAt: att.submittedAt,
           lastSavedAt: att.lastSavedAt,
+          attempted: Object.keys(attemptAnswers(att).answers).length,
           eventCount: (att.activityEvents || []).length,
           events: att.activityEvents || [],
           extensions: att.extensions || [],
           autoScore: att.autoScore,
           manualScore: att.manualScore,
           totalScore: att.totalScore,
-          maxScore: att.maxScore || null,
+          maxScore: att.maxScore ?? null,
           isReviewed: att.isReviewed,
           serverTime: new Date().toISOString(),
         });
@@ -647,6 +680,8 @@ function createApp(config = {}) {
     try {
       const attempt = await db.attempts.findBySessionId(req.params.id);
       if (!attempt) return sendError(res, 404, "Attempt not found");
+      if (attempt.status !== "LOCKED") return sendError(res, 409, "Only a locked attempt can be unlocked");
+      if (Date.now() > new Date(attempt.deadline).getTime() + 5000) return sendError(res, 409, "The attempt has expired; extend its deadline first");
       await db.attempts.updateStatus(attempt.id, "IN_PROGRESS");
       await db.attempts.recordEvents(attempt.id, [
         {
@@ -678,6 +713,7 @@ function createApp(config = {}) {
       const attempt = await db.attempts.findBySessionId(req.params.id);
       if (!attempt) return sendError(res, 404, "Attempt not found");
 
+      if (attempt.status === "SUBMITTED") return sendError(res, 409, "A submitted attempt cannot be extended");
       const updated = await db.attempts.extendDeadline(attempt.id, numMinutes, req.user.name);
       await db.attempts.recordEvents(attempt.id, [
         {
@@ -709,8 +745,12 @@ function createApp(config = {}) {
       const attempt = await db.attempts.findBySessionId(req.params.id);
       if (!attempt) return sendError(res, 404, "Attempt not found");
 
-      const finalManual = Number(manualScore) || 0;
+      if (attempt.status !== "SUBMITTED" && attempt.status !== "EXPIRED") return sendError(res, 409, "Finish the attempt before grading");
+      const finalManual = Number(manualScore);
       const totalScore = (attempt.autoScore || 0) + finalManual;
+      if (!Number.isFinite(finalManual) || totalScore < 0 || attempt.maxScore == null || totalScore > attempt.maxScore) {
+        return sendError(res, 400, "The adjusted score must be between zero and the maximum score");
+      }
 
       const updated = await db.attempts.updateGrade(attempt.id, {
         autoScore: attempt.autoScore,
@@ -985,20 +1025,20 @@ function createApp(config = {}) {
 
   // Student: Heartbeat / Active attempt polling
   // Bug 4 + 8: Normalize status, include result for submitted attempts
-  app.get("/api/student/attempt", async (req, res) => {
+  app.get("/api/student/attempt", serializeAttempt(async (req, res) => {
     const authHeader = req.get("authorization") || "";
     const rawToken = authHeader.replace(/^Bearer\s+/i, "").trim();
     if (!rawToken) return sendError(res, 401, "Attempt token required");
 
     try {
-      const attempt = await db.attempts.findByTokenHash(hashToken(rawToken));
+      let attempt = await db.attempts.findByTokenHash(hashToken(rawToken));
       if (!attempt) return sendError(res, 401, "Invalid session token");
 
       // Check deadline expiry
       const now = Date.now();
-      if (attempt.status === "IN_PROGRESS" && now > new Date(attempt.deadline).getTime() + 5000) {
-        await db.attempts.updateStatus(attempt.id, "EXPIRED", new Date());
-        attempt.status = "EXPIRED";
+      if (["IN_PROGRESS", "LOCKED"].includes(attempt.status) && now > new Date(attempt.deadline).getTime() + 5000) {
+        const finalized = await finalizeStoredAttempt(attempt, "EXPIRED");
+        attempt = { ...attempt, ...finalized };
       }
 
       const questions = await db.questions.listByExam(attempt.examId);
@@ -1025,10 +1065,10 @@ function createApp(config = {}) {
     } catch (err) {
       sendError(res, 500, err.message);
     }
-  });
+  }));
 
   // Student: Autosave answers
-  app.put("/api/student/attempt/answers", async (req, res) => {
+  app.put("/api/student/attempt/answers", serializeAttempt(async (req, res) => {
     const rawToken = (req.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
     if (!rawToken) return sendError(res, 401, "Attempt token required");
 
@@ -1045,8 +1085,8 @@ function createApp(config = {}) {
 
       // Check deadline
       if (Date.now() > new Date(attempt.deadline).getTime() + 5000) {
-        await db.attempts.updateStatus(attempt.id, "EXPIRED", new Date());
-        return sendError(res, 409, "Attempt is expired", { attempt: { status: "expired" } });
+        const expired = await finalizeStoredAttempt(attempt, "EXPIRED");
+        return sendError(res, 409, "Attempt is expired", { attempt: attemptSnapshot(expired) });
       }
 
       const { answers = {}, flags = [] } = req.body || {};
@@ -1064,10 +1104,10 @@ function createApp(config = {}) {
     } catch (err) {
       sendError(res, 500, err.message);
     }
-  });
+  }));
 
   // Student: Report integrity events
-  app.post("/api/student/attempt/events", async (req, res) => {
+  app.post("/api/student/attempt/events", serializeAttempt(async (req, res) => {
     const rawToken = (req.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
     if (!rawToken) return sendError(res, 401, "Attempt token required");
 
@@ -1080,9 +1120,14 @@ function createApp(config = {}) {
       }
 
       const { events } = req.body || {};
-      if (Array.isArray(events) && events.length > 0) {
-        await db.attempts.recordEvents(attempt.id, events);
+      if (!Array.isArray(events) || !events.length || events.length > 50) return sendError(res, 400, "events must contain 1 to 50 items");
+      if (events.some((event) => !event || !rules.EVENT_TYPES.has(event.type) || typeof event.id !== "string" || !/^[\w-]{1,64}$/.test(event.id))) {
+        return sendError(res, 400, "Each activity event needs a valid id and supported type");
       }
+      await db.attempts.recordEvents(attempt.id, events.map((event) => ({
+        ...event, severity: rules.severityOf(event.type).toUpperCase(),
+        at: Number.isFinite(Date.parse(event.at)) ? new Date(event.at).toISOString() : null,
+      })));
 
       // Re-read the attempt so a fullscreen-exit lock is reflected in the response.
       const refreshed = (await db.attempts.findById(attempt.id)) || attempt;
@@ -1090,10 +1135,10 @@ function createApp(config = {}) {
     } catch (err) {
       sendError(res, 500, err.message);
     }
-  });
+  }));
 
   // Student: Upload proctoring evidence (screen / camera snap)
-  app.post("/api/student/attempt/evidence", async (req, res) => {
+  app.post("/api/student/attempt/evidence", serializeAttempt(async (req, res) => {
     const rawToken = (req.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
     if (!rawToken) return sendError(res, 401, "Attempt token required");
 
@@ -1130,10 +1175,10 @@ function createApp(config = {}) {
       console.error("Evidence upload error:", err);
       sendError(res, 500, err.message);
     }
-  });
+  }));
 
   // Student: Submit exam attempt (Bug 7: atomic, idempotent, full result)
-  app.post("/api/student/attempt/submit", async (req, res) => {
+  app.post("/api/student/attempt/submit", serializeAttempt(async (req, res) => {
     const rawToken = (req.get("authorization") || "").replace(/^Bearer\s+/i, "").trim();
     if (!rawToken) return sendError(res, 401, "Attempt token required");
 
@@ -1160,7 +1205,7 @@ function createApp(config = {}) {
       // Answers are only accepted while the attempt is in progress. A locked or
       // expired attempt keeps the answers the server already has; an
       // administrator must unlock it before any change is accepted.
-      if (attempt.status === "IN_PROGRESS") {
+      if (attempt.status === "IN_PROGRESS" && Date.now() <= new Date(attempt.deadline).getTime() + 5000) {
         const examQuestions = await db.questions.listByExam(attempt.examId);
         const invalid = answerPayloadError(examQuestions, answers, flags);
         if (invalid) return sendError(res, 400, invalid);
@@ -1182,15 +1227,8 @@ function createApp(config = {}) {
       const questions = await db.questions.listByExam(attempt.examId, { includeAnswers: true });
       const gradingResult = gradeAttempt(questions, storedAnswers.answers);
 
-      const submittedAt = new Date();
-      await db.attempts.updateStatus(freshAttempt.id, "SUBMITTED", submittedAt);
-      await db.attempts.updateGrade(freshAttempt.id, {
-        autoScore: gradingResult.autoScore,
-        manualScore: 0,
-        totalScore: gradingResult.autoScore,
-        maxScore: gradingResult.maxPossible,
-        isReviewed: !gradingResult.hasManualPending,
-      });
+      const finalized = await db.attempts.finalize(freshAttempt.id, gradingResult);
+      const submittedAt = finalized.submittedAt;
 
       await db.audit.log({
         userId: attempt.userId,
@@ -1221,7 +1259,7 @@ function createApp(config = {}) {
     } catch (err) {
       sendError(res, 500, err.message);
     }
-  });
+  }));
 
   // ---------------- Backward Compatibility Endpoints ----------------
   // (Preserves existing legacy tests and workflows)
