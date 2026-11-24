@@ -211,7 +211,7 @@ To produce the official release DMG for distribution to students:
 
 ```bash
 # 1. Ensure production API URL is set (or baked in):
-export VITE_ATHENA_API_URL="https://your-athena-backend.onrender.com"
+export VITE_ATHENA_API_URL="https://athena-backend-2a0l.onrender.com"
 
 # 2. Build frontend and package macOS DMG:
 npm run dist
