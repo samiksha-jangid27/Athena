@@ -620,6 +620,7 @@ function createApp(config = {}) {
       if (!deleted) return sendError(res, 404, "Student not found");
       res.json({ message: "Student account deleted" });
     } catch (err) {
+      if (err.code === "STUDENT_HAS_ATTEMPTS") return sendError(res, 409, err.message);
       sendError(res, 500, err.message);
     }
   });
@@ -835,8 +836,21 @@ function createApp(config = {}) {
 
   // ---------------- Student Examination Experience ----------------
 
+  // Deleting an unused account also invalidates its previously issued JWT.
+  async function requireExistingStudent(req, res, next) {
+    try {
+      const student = await db.users.findById(req.user.id);
+      if (!student || student.role !== "STUDENT") {
+        return sendError(res, 401, "This student account no longer exists. Please sign in again.");
+      }
+      next();
+    } catch (err) {
+      sendError(res, 500, err.message);
+    }
+  }
+
   // Student: List published exams (Bug 6: include per-exam attempt status/score)
-  app.get("/api/student/exams", ...requireStudent, async (req, res) => {
+  app.get("/api/student/exams", ...requireStudent, requireExistingStudent, async (req, res) => {
     try {
       const exams = await db.exams.listPublished();
       const examList = [];
@@ -864,7 +878,7 @@ function createApp(config = {}) {
   });
 
   // Student: Start exam attempt (Bug 6: enforce one attempt per student per exam)
-  app.post("/api/student/exams/:id/start", ...requireStudent, async (req, res) => {
+  app.post("/api/student/exams/:id/start", ...requireStudent, requireExistingStudent, async (req, res) => {
     try {
       const exam = await db.exams.findById(req.params.id);
       if (!exam || exam.status !== "PUBLISHED") {

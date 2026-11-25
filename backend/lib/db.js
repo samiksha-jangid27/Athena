@@ -258,11 +258,32 @@ const db = {
     },
 
     async deleteUser(id) {
+      const hasAttempts = () => Object.assign(
+        new Error("This student has exam attempts. The account cannot be deleted because its results and evidence must be retained."),
+        { code: "STUDENT_HAS_ATTEMPTS" }
+      );
       if (prismaClient) {
-        return prismaClient.user.delete({ where: { id } });
+        try {
+          return await prismaClient.$transaction(async (tx) => {
+            const student = await tx.user.findUnique({ where: { id } });
+            if (!student || student.role !== "STUDENT") return null;
+            if (await tx.attempt.count({ where: { userId: id } })) throw hasAttempts();
+            return tx.user.delete({ where: { id } });
+          });
+        } catch (err) {
+          // A concurrent exam start can add a reference after the count check.
+          if (err.code === "P2003") throw hasAttempts();
+          if (err.code === "P2025") return null;
+          throw err;
+        }
       }
-      const idx = memoryStore.users.findIndex((u) => u.id === id);
+      const idx = memoryStore.users.findIndex((u) => u.id === id && u.role === "STUDENT");
       if (idx !== -1) {
+        if (memoryStore.attempts.some((attempt) => attempt.userId === id)) throw hasAttempts();
+        // Match the optional audit-log relation's PostgreSQL SET NULL behavior.
+        for (const entry of memoryStore.auditLogs) {
+          if (entry.userId === id) entry.userId = null;
+        }
         return memoryStore.users.splice(idx, 1)[0];
       }
       return null;

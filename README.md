@@ -76,6 +76,7 @@ Athena is architected as a centralized client-server platform where all students
 - **Student Provisioning**:
   - Provision student accounts with usernames and temporary passwords.
   - List and provision student accounts; published exams are available to all student accounts.
+  - Delete unused student accounts with an in-app confirmation. Accounts with exam attempts are retained to preserve results and evidence.
 - **Real-Time Proctoring & Attempt Monitoring**:
   - Live table of all attempts with status badges (`In progress`, `Locked`, `Submitted`, `Expired`).
   - Auto-refreshing countdowns and critical violation counters.
@@ -117,7 +118,7 @@ npm run electron
 
 ### 3. Run Test Suites & Linter
 ```bash
-# Run all tests (57 backend integration & rule tests + 38 frontend & Electron tests)
+# Run all tests (61 backend integration & rule tests + 38 frontend & Electron tests)
 npm test
 
 # Run ESLint across frontend and main process
@@ -126,6 +127,8 @@ npm run lint
 # Build frontend production bundle
 npm run build:frontend
 ```
+
+CI also runs three student-deletion integration tests against a disposable PostgreSQL 16 database, covering foreign-key constraints, audit retention and revoked sessions.
 
 ---
 
@@ -205,20 +208,21 @@ npx prisma generate
 
 ## 7. Packaging the macOS DMG
 
-To produce the official release DMG for distribution to students:
+To produce the Apple Silicon demo DMG without an Apple Developer certificate:
 
 ```bash
 # 1. Ensure production API URL is set (or baked in):
 export VITE_ATHENA_API_URL="https://athena-backend-2a0l.onrender.com"
 
 # 2. Build frontend and package macOS DMG:
-npm run dist
+npm run dist:mac:demo
 ```
 
-- Output DMG artifact: `release/Athena-1.0.1-arm64.dmg` (~123 MB).
+- Output DMG artifact: `release/Athena-1.0.2-arm64.dmg` (~123 MB).
 - Architecture: Apple Silicon (`arm64`).
 - Minimum supported macOS: 13.0; the supplied artifact targets Apple Silicon (`arm64`).
-- Code Signing & Notarization: The local demo build is not Developer ID signed or notarized. Internet distribution requires a Developer ID certificate and Apple notarization credentials. Packaging uses `--publish never`; it does not create a GitHub release.
+- Code Signing & Notarization: `dist:mac:demo` applies an ad-hoc signature with camera and Electron runtime entitlements and keeps hardened runtime enabled. CI verifies the app signature and DMG integrity. This is not a Developer ID signature or Apple notarization, so downloaded copies may still require explicit user approval in System Settings → Privacy & Security → Open Anyway. See [Apple's instructions](https://support.apple.com/en-us/102445). Do not disable Gatekeeper globally.
+- For trusted internet distribution, configure a Developer ID certificate and Apple notarization credentials, then use `npm run dist`. Both packaging commands use `--publish never`; neither creates a GitHub release.
 
 ---
 

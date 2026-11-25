@@ -96,6 +96,9 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
   const [newStudentName, setNewStudentName] = useState('')
   const [newStudentPass, setNewStudentPass] = useState('')
   const [addingStudent, setAddingStudent] = useState(false)
+  const [studentToDelete, setStudentToDelete] = useState(null)
+  const [deletingStudent, setDeletingStudent] = useState(false)
+  const [deleteStudentError, setDeleteStudentError] = useState(null)
 
   // Load attempts
   const refreshAttempts = async () => {
@@ -143,6 +146,28 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
       notify(err.message || 'Failed to load students', 'error')
     } finally {
       setLoadingStudents(false)
+    }
+  }
+
+  const handleDeleteStudent = async () => {
+    if (!studentToDelete || deletingStudent) return
+    setDeletingStudent(true)
+    setDeleteStudentError(null)
+    try {
+      await api.admin.deleteStudent(adminToken, studentToDelete.id)
+      setStudents((current) => current.filter((student) => student.id !== studentToDelete.id))
+      setStudentToDelete(null)
+      notify('Student deleted.', 'success')
+    } catch (err) {
+      if (err instanceof HttpError && (err.status === 401 || err.status === 403)) {
+        onSignOut?.()
+        return
+      }
+      setDeleteStudentError(err instanceof HttpError
+        ? err.body?.message || err.message
+        : api.describeConnectionError(err).message)
+    } finally {
+      setDeletingStudent(false)
     }
   }
 
@@ -680,12 +705,9 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
                           size="sm"
                           variant="ghost"
                           className="btn-danger"
-                          onClick={async () => {
-                            if (window.confirm(`Delete student account ${st.username}?`)) {
-                              await api.admin.deleteStudent(adminToken, st.id)
-                              notify('Student deleted.', 'info')
-                              refreshStudents()
-                            }
+                          onClick={() => {
+                            setDeleteStudentError(null)
+                            setStudentToDelete(st)
                           }}>
                           Delete
                         </Button>
@@ -698,6 +720,22 @@ export default function InstructorDashboard({ adminUser, adminToken, onSignOut }
           </div>
         </section>
       )}
+
+      <Modal
+        open={studentToDelete !== null}
+        title="Delete Student Account"
+        tone="danger"
+        onClose={() => { if (!deletingStudent) setStudentToDelete(null) }}
+        footer={(
+          <>
+            <Button variant="secondary" disabled={deletingStudent} onClick={() => setStudentToDelete(null)}>Cancel</Button>
+            <Button variant="danger" loading={deletingStudent} onClick={handleDeleteStudent}>Delete Account</Button>
+          </>
+        )}>
+        <p>Delete the account for <strong>{studentToDelete?.name}</strong> (<code>{studentToDelete?.username}</code>)? This cannot be undone.</p>
+        <p className="subtle">Accounts with exam attempts cannot be deleted because their results and evidence must be retained.</p>
+        {deleteStudentError && <div role="alert"><Callout tone="danger">{deleteStudentError}</Callout></div>}
+      </Modal>
 
       {/* CREATE EXAM MODAL */}
       <Modal

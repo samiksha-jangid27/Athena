@@ -605,6 +605,74 @@ test("evidence uploads are validated and closed once the attempt is finished", a
   assert.match(afterSubmit.data.message, /submitted/i);
 });
 
+test("deleting an unused student removes login and rejects existing session tokens", async () => {
+  const admin = await adminToken();
+  const username = unique("delete_student");
+  const token = await createStudent(admin, username);
+  const student = await db.users.findByUsername(username);
+  const { exam } = await createPublishedMcqExam(admin);
+  const path = `/api/admin/students/${student.id}`;
+  assert.equal((await call(path, { method: "DELETE", token: admin })).res.status, 200);
+  const listed = await call("/api/admin/students", { token: admin });
+  assert.ok(!listed.data.students.some((row) => row.id === student.id));
+  assert.equal((await call("/api/auth/login", { method: "POST", body: { username, password: STUDENT_PASSWORD } })).res.status, 401);
+  assert.equal((await call("/api/student/exams", { token })).res.status, 401);
+  assert.equal((await startExam(token, exam.id)).res.status, 401);
+  assert.ok(!memoryStore.attempts.some((attempt) => attempt.userId === student.id));
+  assert.ok(!memoryStore.auditLogs.some((entry) => entry.userId === student.id));
+  assert.equal((await call(path, { method: "DELETE", token: admin })).res.status, 404);
+});
+
+test("student deletion preserves exam history and returns an actionable conflict", async () => {
+  const admin = await adminToken();
+  const username = unique("retain_student");
+  const studentToken = await createStudent(admin, username);
+  const student = await db.users.findByUsername(username);
+  const { exam, questions } = await createPublishedMcqExam(admin);
+  const start = await startExam(studentToken, exam.id);
+  const path = `/api/admin/students/${student.id}`;
+  assert.equal((await call(path, { method: "DELETE", token: admin })).res.status, 409, "active attempts are retained");
+  await call("/api/student/attempt/submit", { method: "POST", token: start.data.token, body: { answers: { [questions[0].id]: 0 } } });
+  const blocked = await call(path, { method: "DELETE", token: admin });
+  assert.equal(blocked.res.status, 409);
+  assert.match(blocked.data.message, /results and evidence must be retained/);
+  assert.ok(await db.users.findById(student.id));
+  assert.equal((await db.attempts.findBySessionId(start.data.sessionId)).totalScore, 10);
+});
+
+test("student deletion requires an admin and cannot remove administrator accounts", async () => {
+  const admin = await adminToken();
+  const username = unique("protected_student");
+  const token = await createStudent(admin, username);
+  const student = await db.users.findByUsername(username);
+  const path = `/api/admin/students/${student.id}`;
+  assert.equal((await call(path, { method: "DELETE" })).res.status, 401);
+  assert.equal((await call(path, { method: "DELETE", token })).res.status, 403);
+  const administrator = await db.users.findByUsername("admin");
+  assert.equal((await call(`/api/admin/students/${administrator.id}`, { method: "DELETE", token: admin })).res.status, 404);
+  assert.ok(await db.users.findById(administrator.id));
+  assert.ok(await db.users.findById(student.id));
+});
+
+test("a failed delete leaves the student intact and can be retried", async () => {
+  const admin = await adminToken();
+  const username = unique("retry_delete");
+  await createStudent(admin, username);
+  const student = await db.users.findByUsername(username);
+  const path = `/api/admin/students/${student.id}`;
+  const original = db.users.deleteUser;
+  db.users.deleteUser = async () => { throw new Error("simulated deletion failure"); };
+  try {
+    const failed = await call(path, { method: "DELETE", token: admin });
+    assert.equal(failed.res.status, 500);
+    assert.match(failed.data.message, /simulated deletion failure/);
+    assert.ok(await db.users.findById(student.id));
+  } finally {
+    db.users.deleteUser = original;
+  }
+  assert.equal((await call(path, { method: "DELETE", token: admin })).res.status, 200);
+});
+
 test("repository failures surface as clear 500 errors", async () => {
   const admin = await adminToken();
   const original = db.exams.listAll;

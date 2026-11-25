@@ -1,6 +1,6 @@
 {
   "name": "athena",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "A cross-platform desktop examination and proctoring platform featuring exam integrity monitoring, camera and screen capture, instructor controls, and practical assessment support.",
   "author": "Samiksha Jangid",
   "private": true,
